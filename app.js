@@ -99,6 +99,26 @@ function stage(p, d = today()) {
 const STAGE_LABEL = { planning: "Planning", germination: "Germination", seedling: "Seedling", veg: "Vegetative", flower: "Flowering", flush: "Finish / harvest window", drying: "Drying", curing: "Curing", done: "Done" };
 const STAGE_ORDER = ["germination", "seedling", "veg", "flower", "flush", "drying", "curing"];
 
+/* ---------------- strain database ---------------- */
+const DB = typeof STRAINS !== "undefined" ? STRAINS : [];
+const norm = x => String(x || "").toLowerCase().replace(/autoflowering|autoflower|automatic/g, "auto").replace(/[^a-z0-9]/g, "");
+function findStrain(name) {
+  const n = norm(name); if (!n) return null;
+  const wantsAuto = /auto/.test(n);
+  const keys = st => [st.name, ...(st.aka || [])].map(norm);
+  let hit = DB.find(st => keys(st).includes(n));
+  if (!hit) { const base = n.replace(/auto/g, ""); hit = DB.find(st => st.type === (wantsAuto ? "auto" : "photo") && keys(st).some(k => k.replace(/auto/g, "") === base)); if (!hit && base) hit = DB.find(st => keys(st).some(k => k.replace(/auto/g, "") === base)); }
+  if (!hit && n.length >= 4) hit = DB.find(st => keys(st).some(k => k.startsWith(n) || (n.length >= 6 && k.includes(n))));
+  if (hit && wantsAuto && hit.type === "photo") { const a = DB.find(st => st.type === "auto" && norm(st.name).replace(/auto/g, "") === norm(hit.name)); return a ? { ...a, exact: false } : { ...hit, type: "auto", days: [70, 84], derived: true, exact: false }; }
+  return hit ? { ...hit, exact: keys(hit).includes(n) } : (wantsAuto ? { name, type: "auto", days: [70, 84], thc: null, lean: "", derived: true, unknown: true } : null);
+}
+const rng = a => a ? (a[0] === a[1] ? `${a[0]}` : `${a[0]}–${a[1]}`) : "";
+function strainSummary(st) {
+  if (!st) return "";
+  const time = st.type === "auto" ? `${rng(st.days)} days seed → harvest` : `flowers ${rng(st.flower)} weeks after flip`;
+  return `${st.type === "auto" ? "Autoflower" : "Photoperiod"} · ${time}${st.thc ? ` · THC ${rng(st.thc)}%` : ""}${st.lean ? ` · ${st.lean}` : ""}`;
+}
+function thcText(p) { const parts = []; if (p.thcLab) parts.push(`${p.thcLab}% THC (lab)`); else if (p.thc) parts.push(`${p.thc}% THC (listed)`); if (p.cbd) parts.push(`${p.cbd}% CBD`); return parts.join(" · "); }
 function plantedDate(p) { return evDate(p, "planted") || evDate(p, "popped") || baseDate(p); }
 function flowerDate(p) { return p.type === "auto" ? (evDate(p, "first_pistils") || null) : (evDate(p, "flip") || null); }
 function dayWeek(from, d = today()) { if (!from) return null; const n = diff(d, from) + 1; return { day: n, week: Math.ceil(n / 7) }; }
@@ -363,14 +383,21 @@ function photoBlock(key) { const ph = C.photos[key]; if (!ph) return ""; return 
 
 /* ---------------- UI helpers ---------------- */
 function toast(m) { const t = $("#toast"); t.textContent = m; t.classList.add("on"); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove("on"), 1800); }
-const TABS = [["today", "Today"], ["plants", "My plants"], ["weeks", "Week by week"], ["calendar", "Calendar"], ["feed", "Feeding"], ["train", "Training"], ["tent", "Tents & lights"], ["look", "Healthy vs Problems"], ["yield", "Yield"], ["plant", "Plant log"], ["report", "Print / Export"], ["settings", "Settings"]];
-function renderNav() { $("#nav").innerHTML = TABS.map(([k, l]) => `<button data-tab="${k}" class="${S.tab === k ? "on" : ""}">${l}</button>`).join(""); }
+const ICONS = { today: "🏠", plants: "🪴", weeks: "📍", calendar: "📅", feed: "🧪", train: "✂️", tent: "⛺", look: "🔍", strains: "🧬", yield: "⚖️", plant: "📓", report: "🖨", settings: "⚙️" };
+const BOTTOM = ["today", "plants", "weeks", "calendar"];
+const TABS = [["today", "Today"], ["plants", "My plants"], ["weeks", "Week by week"], ["calendar", "Calendar"], ["feed", "Feeding"], ["train", "Training"], ["tent", "Tents & lights"], ["look", "Healthy vs Problems"], ["strains", "Strains"], ["yield", "Yield"], ["plant", "Plant log"], ["report", "Print / Export"], ["settings", "Settings"]];
+function renderNav() {
+  $("#nav").innerHTML = TABS.map(([k, l]) => `<button data-tab="${k}" class="${S.tab === k ? "on" : ""}"><span class="ico">${ICONS[k] || ""}</span><span>${l}</span></button>`).join("");
+  const more = !BOTTOM.includes(S.tab);
+  $("#bottom").innerHTML = BOTTOM.map(k => `<button data-tab="${k}" class="${S.tab === k ? "on" : ""}"><span class="ico">${ICONS[k]}</span><span>${(TABS.find(t => t[0] === k) || [])[1].replace("Week by week", "Weeks").replace("My plants", "Plants")}</span></button>`).join("") + `<button data-act="more" class="${more ? "on" : ""}"><span class="ico">☰</span><span>${more ? (TABS.find(t => t[0] === S.tab) || [, "More"])[1].split(" ")[0] : "More"}</span></button>`;
+  $("#moreGrid").innerHTML = TABS.filter(([k]) => !BOTTOM.includes(k)).map(([k, l]) => `<button data-tab="${k}" class="${S.tab === k ? "on" : ""}"><span class="ico">${ICONS[k]}</span>${l}</button>`).join("");
+}
 function renderPick() {
   const sel = $("#plantPick");
   sel.innerHTML = S.plants.length ? S.plants.map(p => `<option value="${p.id}" ${p.id === (plant() || {}).id ? "selected" : ""}>${esc(p.name)}</option>`).join("") : `<option>No plants yet</option>`;
   sel.disabled = !S.plants.length;
 }
-function go(tab) { S.tab = tab; save(); render(); window.scrollTo(0, 0); }
+function go(tab) { S.tab = tab; document.body.classList.remove("sheet"); save(); render(); window.scrollTo(0, 0); }
 function applyTheme() { const t = S.settings.theme; if (t === "auto") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", t); }
 
 function stageBar(p) { const st = stage(p); const idx = STAGE_ORDER.indexOf(st === "done" ? "curing" : st); return `<div class="stagebar">${STAGE_ORDER.map((s, i) => `<span class="${i < idx ? "on" : i === idx ? "now" : ""}" title="${STAGE_LABEL[s]}"></span>`).join("")}</div>`; }
@@ -406,7 +433,7 @@ function plantCard(p) {
   const ch = chartFor(p), str = Number(p.strength) || 0.5, gal = Number(p.mixGal) || 1;
   const mix = ch.plain ? [] : mixFor(ch.row, str, gal);
   return `<div class="card">
-    <div class="row between"><div><h3 style="margin:0">${esc(p.name)}</h3><div class="small muted">${esc(p.strain || "Unknown strain")} · ${p.type === "auto" ? "Autoflower" : "Photoperiod"}</div></div>${stagePill(p)}</div>
+    <div class="row between"><div><h3 style="margin:0">${esc(p.name)}</h3><div class="small muted">${esc(p.strain || "Unknown strain")} · ${p.type === "auto" ? "Autoflower" : "Photoperiod"}${thcText(p) ? " · " + esc(thcText(p)) : ""}</div></div>${stagePill(p)}</div>
     ${stageBar(p)}
     <div class="small"><b>${weekLabel(p)}</b></div>
     <div style="margin-top:10px" class="small muted">This week's feed ${ch.row ? `· ${esc(ch.row.label)}` : ""} · ${Math.round(str * 100)}% strength · per ${gal} gal</div>
@@ -741,6 +768,7 @@ V.plants = () => {
         <tr><td class="muted">Planted</td><td>${pl ? fmtLong(pl) : "—"}</td></tr>
         <tr><td class="muted">${hv ? "Grow length" : "Today"}</td><td><b>${dw ? (hv ? `${tot} days (${Math.ceil(tot / 7)} weeks)` : `Day ${dw.day} · Week ${dw.week}`) : "Not planted yet"}</b></td></tr>
         <tr><td class="muted">Flowered</td><td>${fl ? fmtLong(fl) + (hv ? ` · ${diff(hv, fl)} days in flower` : ` · flower day ${fdw.day} (week ${fdw.week})`) : "—"}</td></tr>
+        <tr><td class="muted">THC</td><td>${esc(thcText(p) || "—")}</td></tr>
         <tr><td class="muted">Weight</td><td>${h.wet || h.dry ? `${h.wet ? h.wet + " g wet" : ""}${h.wet && h.dry ? " · " : ""}${h.dry ? h.dry + " g dry" : ""}` : "—"}</td></tr>
       </tbody></table>
       <div class="row" style="margin-top:8px"><button class="btn sm" data-act="openPlant" data-id="${p.id}">Open</button><button class="btn sm" data-act="editPlant" data-id="${p.id}">✏️ Rename / edit</button><button class="btn sm" data-act="logEvent" data-id="${p.id}">📅 Milestone</button><button class="btn sm" data-act="printOne" data-id="${p.id}">🖨 Print</button></div>
@@ -777,6 +805,7 @@ function reportPlant(p) {
         ${row("Wet weight", h.wet ? `${h.wet} g (${(h.wet / 28.35).toFixed(2)} oz)` : "—")}
         ${row("Dry weight", h.dry ? `${h.dry} g (${(h.dry / 28.35).toFixed(2)} oz)` : "—")}
         ${row("Dry ÷ wet", h.wet && h.dry ? Math.round(h.dry / h.wet * 100) + "%" : "—")}
+        ${row("THC / CBD", esc(thcText(p) || "—"))}
       </tbody></table>
     </div>
     <h3 style="margin-top:14px">Nutrients added (FoxFarm totals)</h3>
@@ -809,12 +838,12 @@ function csv(rows) { return rows.map(r => r.map(v => { v = v == null ? "" : Stri
 function download(name, text, type = "text/csv") { const u = URL.createObjectURL(new Blob([text], { type })); const l = document.createElement("a"); l.href = u; l.download = name; l.click(); setTimeout(() => URL.revokeObjectURL(u), 1000); }
 function reportSelection() { return S.plants.filter(p => !S.reportSel || !S.reportSel.length || S.reportSel.includes(p.id)); }
 function csvSummary() {
-  const head = ["Name", "Strain", "Type", "Source", "Seller/breeder", "Germination", "Popped", "Planted", "Sprouted", "Flowered", "Harvested", "Days planted", "Weeks planted", "Days veg", "Days flower", "Wet g", "Dry g", ...ALLPRODUCTS.map(k => C.foxfarm.products[k].name + " total tsp")];
+  const head = ["Name", "Strain", "Type", "Source", "Seller/breeder", "Germination", "Popped", "Planted", "Sprouted", "Flowered", "Harvested", "Days planted", "Weeks planted", "Days veg", "Days flower", "Wet g", "Dry g", "THC % listed", "THC % lab", "CBD %", ...ALLPRODUCTS.map(k => C.foxfarm.products[k].name + " total tsp")];
   const rows = reportSelection().map(p => {
     const pl = plantedDate(p), fl = flowerDate(p), hv = evDate(p, "harvest"), b = baseDate(p), end = hv || today(), tot = pl ? diff(end, pl) + 1 : "";
     const nt = Object.fromEntries(nutrientTotals(p).map(n => [n.k, n.tsp.toFixed(2)]));
     const d = t => evDate(p, t) ? iso(evDate(p, t)) : "";
-    return [p.name, p.strain, p.type, p.sourceType, p.source, d("germ_start"), d("popped"), d("planted"), d("sprouted"), fl ? iso(fl) : "", d("harvest"), tot, tot ? Math.ceil(tot / 7) : "", b && fl ? diff(fl, b) : "", fl ? diff(end, fl) : "", p.harvest?.wet || "", p.harvest?.dry || "", ...ALLPRODUCTS.map(k => nt[k] || "")];
+    return [p.name, p.strain, p.type, p.sourceType, p.source, d("germ_start"), d("popped"), d("planted"), d("sprouted"), fl ? iso(fl) : "", d("harvest"), tot, tot ? Math.ceil(tot / 7) : "", b && fl ? diff(fl, b) : "", fl ? diff(end, fl) : "", p.harvest?.wet || "", p.harvest?.dry || "", p.thc || "", p.thcLab || "", p.cbd || "", ...ALLPRODUCTS.map(k => nt[k] || "")];
   });
   download(`growlog-summary-${iso(today())}.csv`, csv([head, ...rows]));
 }
@@ -825,6 +854,16 @@ function csvLogs() {
   download(`growlog-feeding-log-${iso(today())}.csv`, csv([head, ...rows]));
 }
 
+V.strains = () => {
+  const q = S.strainQ || "", f = S.strainF || "all";
+  const list = DB.filter(st => (f === "all" || st.type === f) && (!q || norm(st.name + " " + (st.aka || []).join(" ")).includes(norm(q))));
+  return `<h1>Strain library</h1>
+  <p class="muted small">Typical breeder-listed numbers for ${DB.length} popular strains. Pick one when you add a plant and GrowLog fills in the type, bud time and THC. New strains get added on each scheduled update.</p>
+  <div class="row" style="margin-bottom:10px"><input id="strainQ" placeholder="Search strains…" value="${esc(q)}" style="flex:1;min-width:180px"><div class="chips">${[["all", "All"], ["photo", "Photoperiod"], ["auto", "Autoflower"]].map(([k, l]) => `<button data-act="strainF" data-k="${k}" class="${f === k ? "on" : ""}">${l}</button>`).join("")}</div></div>
+  <div class="tablewrap"><table><thead><tr><th>Strain</th><th>Type</th><th>Time to bud / harvest</th><th>THC %</th><th>Lean</th><th></th></tr></thead><tbody>
+  ${list.map(st => `<tr><td><b>${esc(st.name)}</b>${st.aka && st.aka.length ? `<div class="small muted">aka ${esc(st.aka.join(", "))}</div>` : ""}</td><td><span class="pill ${st.type === "auto" ? "p" : "g"}">${st.type === "auto" ? "Auto" : "Photo"}</span></td><td>${st.type === "auto" ? `${rng(st.days)} days seed → harvest` : `${rng(st.flower)} wks flower`}</td><td>${rng(st.thc)}</td><td class="small">${esc(st.lean)}</td><td><button class="btn sm" data-act="growStrain" data-s="${esc(st.name)}">+ Grow</button></td></tr>`).join("") || `<tr><td colspan="6" class="muted">No match. Add the plant anyway and enter the details from the seed pack.</td></tr>`}
+  </tbody></table></div>`;
+};
 V.settings = () => `<h1>Settings</h1>
   <div class="card"><div class="form2">
     <div><label>Tents & lights</label><button class="btn" data-tab="tent">⛺ Manage tents & lights</button></div>
@@ -865,31 +904,55 @@ function openDlg(html, onSubmit) {
   f.onsubmit = e => { const sub = e.submitter && e.submitter.value; if (sub !== "ok") return; const fd = Object.fromEntries(new FormData(f)); onSubmit(fd); };
   d.showModal();
 }
+function strainInfoHtml(name) {
+  if (!name) return `🧬 Type a strain and GrowLog will fill in whether it's an <b>autoflower or photoperiod</b>, <b>how long it takes to bud</b>, and typical <b>THC</b>.`;
+  const st = findStrain(name);
+  const q = encodeURIComponent(`${name} strain ${/auto/i.test(name) ? "autoflower seed to harvest days" : "flowering time weeks"} THC`);
+  const look = `<a href="https://www.google.com/search?q=${q}" target="_blank" rel="noopener">🔎 Look it up online</a>`;
+  if (!st) return `❔ <b>${esc(name)}</b> isn't in the strain database yet. Check the seed pack or breeder page and enter the type, flower time and THC below. ${look}<br><span class="muted">Strains that aren't listed get researched and added in the next scheduled update.</span>`;
+  if (st.unknown) return `🌀 Name says <b>auto</b>, so it's set as an <b>autoflower</b> (most run 70–84 days seed → harvest). Confirm on the seed pack. ${look}`;
+  return `✅ <b>${esc(st.name)}</b>${st.exact ? "" : " (closest match)"}: ${esc(strainSummary(st))}${st.derived ? " (estimated auto timing)" : ""}<br><span class="muted">Filled in below from typical breeder numbers. Your seed pack wins if it's different.</span> ${look}`;
+}
+function applyStrain(name) {
+  const box = $("#strainInfo"); if (box) box.innerHTML = strainInfoHtml(name);
+  const st = findStrain(name); if (!st) return;
+  if ($("#typeIn")) $("#typeIn").value = st.type;
+  if (st.type === "photo" && st.flower && $("#fwIn")) $("#fwIn").value = st.flower[1];
+  if (st.type === "auto" && st.days && $("#adIn")) $("#adIn").value = Math.round((st.days[0] + st.days[1]) / 2);
+  if (st.thc && $("#thcIn") && !$("#thcIn").dataset.touched) $("#thcIn").value = rng(st.thc);
+}
 function plantForm(p = {}) {
   const isNew = !p.id;
+  setTimeout(() => { if (isNew && p.strain) applyStrain(p.strain); }, 0);
   openDlg(`<h2 style="margin-top:0">${isNew ? "Add a plant" : "Edit plant"}</h2>
     <label>Name</label><input name="name" required value="${esc(p.name || "Plant " + (S.plants.length + 1))}">
-    <label>Strain</label><input name="strain" value="${esc(p.strain || "")}" placeholder="e.g. Blue Dream">
+    <label>Strain</label><input name="strain" id="strainIn" list="strainList" autocomplete="off" value="${esc(p.strain || "")}" placeholder="Start typing: Blue Dream, Gorilla Glue Auto…">
+    <datalist id="strainList">${DB.map(st => `<option value="${esc(st.name)}">`).join("")}</datalist>
+    <div id="strainInfo" class="card soft small" style="margin-top:6px;padding:10px">${strainInfoHtml(p.strain)}</div>
+    <div class="form2">
+      <div><label>THC % (breeder / seed pack)</label><input name="thc" id="thcIn" inputmode="decimal" value="${esc(p.thc || "")}" placeholder="e.g. 22 or 20–25"></div>
+      <div><label>CBD % (optional)</label><input name="cbd" inputmode="decimal" value="${esc(p.cbd || "")}" placeholder="e.g. <1"></div>
+    </div>
     <div class="form2">
       <div><label>Where it came from</label><select name="sourceType">${SOURCES.map(x => `<option ${p.sourceType === x ? "selected" : ""}>${x}</option>`).join("")}</select></div>
       <div><label>Seller / breeder name</label><input name="source" value="${esc(p.source || "")}" placeholder="e.g. ILGM, Barney's Farm"></div>
     </div>
     <div class="form2">
-      <div><label>Seed type</label><select name="type"><option value="photo" ${p.type !== "auto" ? "selected" : ""}>Photoperiod</option><option value="auto" ${p.type === "auto" ? "selected" : ""}>Autoflower</option></select></div>
+      <div><label>Seed type</label><select name="type" id="typeIn"><option value="photo" ${p.type !== "auto" ? "selected" : ""}>Photoperiod</option><option value="auto" ${p.type === "auto" ? "selected" : ""}>Autoflower</option></select></div>
       <div><label>FoxFarm soil</label><select name="soil">${[["oceanforest", "Ocean Forest"], ["happyfrog", "Happy Frog"], ["other", "Other / mix"]].map(([k, l]) => `<option value="${k}" ${p.soil === k ? "selected" : ""}>${l}</option>`).join("")}</select></div>
       <div><label>Final pot (gal)</label><input name="pot" type="number" step="0.5" value="${p.pot || 5}"></div>
       <div><label>Feeding strength %</label><input name="strength" type="number" min="25" max="100" step="5" value="${Math.round((p.strength || 0.5) * 100)}"></div>
       <div style="grid-column:1/-1"><label>Tent</label><select name="tentId">${gear().tents.map(t => `<option value="${t.id}" ${(tentOf(p) || {}).id === t.id ? "selected" : ""}>${esc(tentLabel(t))}</option>`).join("")}</select></div>
       <div><label>Planned veg weeks (photo)</label><input name="vegWeeks" type="number" min="2" max="16" value="${p.vegWeeks || 5}"></div>
-      <div><label>Flower weeks (photo, from breeder)</label><input name="flowerWeeks" type="number" min="6" max="16" value="${p.flowerWeeks || 9}"></div>
+      <div><label>Flower weeks (photo, from breeder)</label><input name="flowerWeeks" id="fwIn" type="number" min="6" max="16" value="${p.flowerWeeks || 9}"></div>
       <div style="grid-column:1/-1"><label>Notes (prints on the report)</label><textarea name="notes">${esc(p.notes || "")}</textarea></div>
-      <div><label>Seed-to-harvest days (auto)</label><input name="autoDays" type="number" min="55" max="120" value="${p.autoDays || 77}"></div>
+      <div><label>Seed-to-harvest days (auto)</label><input name="autoDays" id="adIn" type="number" min="55" max="120" value="${p.autoDays || 77}"></div>
       ${isNew ? `<div><label>Germination started on</label><input name="germ" type="date" value=""></div><div><label>Planted in soil on</label><input name="planted" type="date" value=""></div>` : ""}
     </div>`, fd => {
     const o = isNew ? { id: uid(), events: [], logs: [], created: iso(today()) } : p;
     if (!isNew && fd.tentId && fd.tentId !== (tentOf(p) || {}).id) o.events.push({ id: uid(), type: "note", date: iso(today()), note: "Moved to tent: " + tentLabel(tentById(fd.tentId)) });
     o.tentId = fd.tentId || (gear().tents[0] || {}).id;
-    Object.assign(o, { name: fd.name.trim() || "Plant", strain: fd.strain.trim(), sourceType: fd.sourceType, source: fd.source.trim(), notes: (fd.notes || "").trim(), type: fd.type, soil: fd.soil, pot: +fd.pot, strength: Math.min(1, Math.max(.25, (+fd.strength || 50) / 100)), vegWeeks: +fd.vegWeeks, flowerWeeks: +fd.flowerWeeks, autoDays: +fd.autoDays });
+    Object.assign(o, { name: fd.name.trim() || "Plant", strain: fd.strain.trim(), sourceType: fd.sourceType, source: fd.source.trim(), notes: (fd.notes || "").trim(), thc: (fd.thc || "").trim(), cbd: (fd.cbd || "").trim(), strainRef: (findStrain(fd.strain) || {}).unknown ? null : ((findStrain(fd.strain) || {}).name || null), type: fd.type, soil: fd.soil, pot: +fd.pot, strength: Math.min(1, Math.max(.25, (+fd.strength || 50) / 100)), vegWeeks: +fd.vegWeeks, flowerWeeks: +fd.flowerWeeks, autoDays: +fd.autoDays });
     if (isNew) { if (fd.germ) o.events.push({ id: uid(), type: "germ_start", date: fd.germ, note: "" }); if (fd.planted) o.events.push({ id: uid(), type: "planted", date: fd.planted, note: "" }); S.plants.push(o); S.current = o.id; }
     save(); render(); toast(isNew ? "Plant added" : "Saved");
   });
@@ -968,9 +1031,9 @@ function waterForm(p) {
 function harvestForm(p) {
   const h = p.harvest || {};
   openDlg(`<h2 style="margin-top:0">Harvest weights · ${esc(p.name)}</h2>
-    <div class="form2"><div><label>Wet weight (g)</label><input name="wet" type="number" value="${h.wet || ""}"></div><div><label>Dry trimmed weight (g)</label><input name="dry" type="number" value="${h.dry || ""}"></div></div>
+    <div class="form2"><div><label>Wet weight (g)</label><input name="wet" type="number" value="${h.wet || ""}"></div><div><label>Dry trimmed weight (g)</label><input name="dry" type="number" value="${h.dry || ""}"></div><div><label>Lab-tested THC % (optional)</label><input name="thcLab" inputmode="decimal" value="${esc(p.thcLab || "")}"></div><div><label>Listed THC %</label><input disabled value="${esc(p.thc || "—")}"></div></div>
     ${has(p, "harvest") ? "" : `<label>Chop date (logs the Harvest milestone)</label><input type="date" name="date" value="${iso(today())}">`}`, fd => {
-    p.harvest = { wet: +fd.wet || 0, dry: +fd.dry || 0 };
+    p.harvest = { wet: +fd.wet || 0, dry: +fd.dry || 0 }; p.thcLab = (fd.thcLab || "").trim();
     if (fd.date && !has(p, "harvest") && (fd.wet || fd.dry)) p.events.push({ id: uid(), type: "harvest", date: fd.date, note: "" });
     save(); render(); toast("Saved");
   });
@@ -992,6 +1055,8 @@ function render() {
 document.addEventListener("click", async e => {
   const t = e.target.closest("[data-tab],[data-act]"); if (!t) return;
   if (t.dataset.tab) return go(t.dataset.tab);
+  if (t.dataset.act === "more") { document.body.classList.toggle("sheet"); return; }
+  if (t.dataset.act === "closeSheet") { document.body.classList.remove("sheet"); return; }
   const a = t.dataset.act, p = S.plants.find(x => x.id === t.dataset.id);
   if (a === "addPlant") plantForm();
   if (a === "editPlant") plantForm(p);
@@ -1010,6 +1075,8 @@ document.addEventListener("click", async e => {
   }
   if (a === "syncNow") { const ok = await Cloud.sync(); toast(ok ? "Synced ✓" : (S._sync || {}).msg || "Sync failed"); render(); }
   if (a === "syncOff" && confirm("Disconnect cloud sync on this device? Your data stays here and in the cloud.")) { Cloud.setToken(""); Cloud.cfg().enabled = false; save(); render(); }
+  if (a === "strainF") { S.strainF = t.dataset.k; save(); render(); }
+  if (a === "growStrain") { plantForm({ strain: t.dataset.s }); setTimeout(() => applyStrain(t.dataset.s), 0); }
   if (a === "addTent") tentForm();
   if (a === "editTent") tentForm(tentById(t.dataset.t));
   if (a === "pickTent") { S.activeTent = t.dataset.t; S.tab = "tent"; save(); render(); }
@@ -1043,11 +1110,14 @@ document.addEventListener("change", async e => {
   if (id === "tentModel") { const o = e.target.selectedOptions[0]; if (o && o.dataset.w) { $("#tW").value = o.dataset.w; $("#tD").value = o.dataset.d; $("#tH").value = o.dataset.h; } }
   if (id === "lightModel") { const o = e.target.selectedOptions[0]; if (o && o.dataset.watts) { $("#lWatts").value = o.dataset.watts; if (!$("#lName").value) $("#lName").value = o.value.replace("AC Infinity ", ""); if (!$("#lNote").value) $("#lNote").value = o.dataset.note; } }
   if (id === "setTheme") { S.settings.theme = e.target.value; save(); render(); }
+  if (id === "strainQ") { S.strainQ = e.target.value; save(); render(); const el = $("#strainQ"); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }
   if (id === "calPlant") { S.calPlant = e.target.value; save(); render(); }
   if (id === "photoIn" && e.target.files[0]) { try { const data = await compress(e.target.files[0]); await photoPut({ id: uid(), plantId: p.id, date: iso(today()), data }); toast("Photo saved"); render(); Cloud.schedule(); } catch (err) { toast("Couldn't save photo"); } }
   if (id === "importIn" && e.target.files[0]) { try { await restoreBackup(e.target.files[0]); } catch (err) { toast("That file isn't a GrowLog backup"); } e.target.value = ""; }
 });
-document.addEventListener("input", e => { if (e.target.id === "strength") $("#strLbl").textContent = e.target.value + "%"; });
+document.addEventListener("input", e => {
+  if (e.target.id === "strainIn") applyStrain(e.target.value);
+  if (e.target.id === "thcIn") e.target.dataset.touched = "1"; if (e.target.id === "strength") $("#strLbl").textContent = e.target.value + "%"; });
 
 // expose a few internals for testing
 (async () => {

@@ -120,8 +120,73 @@ footer{max-width:1100px;margin:30px auto;padding:0 16px 30px;color:var(--muted);
   .report table{font-size:9.5pt} .report th,.report td{padding:3px 5px}
   .grid.g2{grid-template-columns:1fr 1fr}
 }
-.report{margin-bottom:16px}
+.report{margin-bottom:16px;overflow-x:auto}
 .report table th{text-transform:none;letter-spacing:0;font-size:13px}
+
+/* ===== Responsive layout v1.4 ===== */
+.ico{display:inline-block;width:1.4em;text-align:center}
+#bottom,#sheet{display:none}
+input,select,textarea{font-size:16px} /* stop iOS zoom */
+.card{border-radius:16px}
+h1{letter-spacing:-.01em}
+/* ---- Phones ---- */
+@media (max-width:760px){
+  body{padding-bottom:calc(72px + env(safe-area-inset-bottom))}
+  header nav{display:none}
+  .top{padding:8px 12px;gap:8px;padding-top:calc(8px + env(safe-area-inset-top))}
+  .brand{font-size:17px}
+  #addPlantBtn{padding:6px 10px;white-space:nowrap}
+  #syncPill{white-space:nowrap}
+  #plantPick{max-width:130px!important;padding:6px 8px;font-size:14px}
+  main{padding:12px}
+  h1{font-size:20px}
+  .grid.g2,.grid.g3{grid-template-columns:1fr}
+  .btn{min-height:40px}
+  .btn.sm{min-height:36px}
+  #bottom{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:30;background:var(--panel);border-top:1px solid var(--line);padding:6px 4px calc(6px + env(safe-area-inset-bottom));box-shadow:0 -4px 18px rgba(0,0,0,.08)}
+  #bottom button{flex:1;border:0;background:transparent;color:var(--muted);font:inherit;font-size:11px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 0;border-radius:12px;cursor:pointer;min-width:0}
+  #bottom button .ico{font-size:20px;width:auto}
+  #bottom button span:last-child{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #bottom button.on{color:var(--accent2);background:var(--accentSoft)}
+  body.sheet #sheet{display:block}
+  #sheet{position:fixed;inset:0;z-index:29}
+  #sheet .bg{position:absolute;inset:0;background:rgba(0,0,0,.4)}
+  #sheet .panel{position:absolute;left:0;right:0;bottom:calc(64px + env(safe-area-inset-bottom));background:var(--panel);border-radius:20px 20px 0 0;padding:14px 14px 18px;box-shadow:0 -10px 30px rgba(0,0,0,.2)}
+  #moreGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  #moreGrid button{border:1px solid var(--line);background:var(--panel2);color:var(--ink);border-radius:14px;padding:12px 6px;font:inherit;font-size:12px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer}
+  #moreGrid button .ico{font-size:22px;width:auto}
+  #moreGrid button.on{border-color:var(--accent);background:var(--accentSoft);color:var(--accent2)}
+  dialog{margin:auto auto 0;width:100%;max-width:100%;border-radius:20px 20px 0 0;max-height:92vh;overflow:auto;padding:16px 16px calc(16px + env(safe-area-inset-bottom))}
+  .cal .day{min-height:52px;padding:3px}
+  .tablewrap table{font-size:13px}
+  footer{padding-bottom:20px}
+  .toast{bottom:calc(84px + env(safe-area-inset-bottom))}
+}
+/* ---- Tablets: top tabs (default) ---- */
+@media (min-width:761px){ header nav button .ico{margin-right:2px} }
+/* ---- Computers: sidebar ---- */
+@media (min-width:1100px){
+  header{position:fixed;top:0;left:0;bottom:0;width:240px;border-bottom:0;border-right:1px solid var(--line);display:flex;flex-direction:column;overflow-y:auto}
+  header .top{flex-direction:column;align-items:stretch;gap:10px;padding:18px 16px 10px;max-width:none;margin:0}
+  header .top .sp{display:none}
+  header .brand{font-size:20px}
+  #plantPick{max-width:none!important;width:100%!important}
+  #addPlantBtn{justify-content:center}
+  #syncPill{align-self:flex-start}
+  header nav{flex-direction:column;overflow:visible;padding:6px 10px 20px;margin:0;max-width:none;gap:2px}
+  header nav button{text-align:left;border-radius:10px;padding:9px 12px;display:flex;align-items:center;gap:8px;font-size:14.5px}
+  header nav button:hover{background:var(--panel2);color:var(--ink)}
+  header nav button.on{background:var(--accentSoft);color:var(--accent2)}
+  main,footer{margin-left:240px;max-width:none;padding-left:32px;padding-right:32px}
+  main{padding-top:24px;max-width:1280px}
+  footer{max-width:1280px}
+  h1{font-size:26px}
+  .grid.g2{grid-template-columns:repeat(auto-fill,minmax(360px,1fr))}
+  .grid.g3{grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
+  .cal .day{min-height:96px}
+  .card:hover{box-shadow:0 2px 6px rgba(0,0,0,.06),0 10px 26px rgba(0,0,0,.07)}
+}
+@media print{#bottom,#sheet{display:none!important} main,footer{margin-left:0!important}}
 </style>
 </head>
 <body>
@@ -137,15 +202,18 @@ footer{max-width:1100px;margin:30px auto;padding:0 16px 30px;color:var(--muted);
 </header>
 <main id="view"></main>
 <footer>
-  GrowLog keeps your data on this device (browser storage). Use Settings → Back up to phone to save a copy.<br>
+  GrowLog keeps your data on this device and, if you turn on Cloud sync, in your private GitHub repo. Settings → Back up to phone saves a copy.<br>
   Feeding amounts come from FoxFarm's soil chart, which FoxFarm calls "recommendations only." Watch your plants and adjust. Photos are from Wikimedia Commons under their own licenses (credited on each photo).<br>
   Grow laws vary by state. Know the rules where you live.
 </footer>
 
 <dialog id="dlg"><form method="dialog" id="dlgForm"></form></dialog>
+<nav id="bottom" aria-label="Main"></nav>
+<div id="sheet"><div class="bg" data-act="closeSheet"></div><div class="panel"><div class="row between" style="margin-bottom:10px"><b>More</b><button class="btn sm ghost" data-act="closeSheet">Close</button></div><div id="moreGrid"></div></div></div>
 <div class="toast" id="toast"></div>
 
-<script src="content.js?v=1.3.0"></script>
-<script src="app.js?v=1.3.0"></script>
+<script src="content.js?v=1.4.0"></script>
+<script src="strains.js?v=1.4.0"></script>
+<script src="app.js?v=1.4.0"></script>
 </body>
 </html>

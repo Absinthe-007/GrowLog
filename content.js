@@ -4,7 +4,7 @@
 // without touching the app logic. Bump CONTENT.version when editing.
 // =====================================================================
 const CONTENT = {
-  version: "1.3.0",
+  version: "1.4.0",
   lastReviewed: "2026-10-16",
 
   // ---------------------------------------------------------------
