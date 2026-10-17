@@ -12,7 +12,11 @@ A phone-friendly web app for tracking an indoor soil grow in an AC Infinity tent
 - **Healthy vs problems** photo guide, with leaf-pattern drawings for deficiencies, burn, pH lockout, pests, mold and herms
 - **Testing reminders** for input pH, weekly runoff pH/PPM, and automatic warnings when readings are out of range
 - **Yield tracker**: wet/dry weight, g/watt, g/sq ft, and estimates before harvest
-- Photo journal, export/import backups, dark mode. All data stays on your device.
+- **My plants**: add and name as many plants as you want, with where each came from, planted date, day/week count, flower date and weight
+- **Print / Export**: a printable one-page report per plant (planted date, source, nutrients added with totals, weights, flower date, days and weeks, milestones and the feeding log). Save it as a PDF, or export CSV spreadsheets
+- **Back up to phone**: saves a backup file (optionally with photos) through the phone's share sheet (Files, iCloud Drive, Google Drive) or to Downloads. Includes restore, a weekly backup reminder, and a request for protected storage
+- Installable to the Home Screen and works offline
+- Photo journal, dark mode. All data stays on your device.
 
 ## Files
 | File | Purpose |

@@ -75,6 +75,16 @@ function stage(p, d = today()) {
 const STAGE_LABEL = { planning: "Planning", germination: "Germination", seedling: "Seedling", veg: "Vegetative", flower: "Flowering", flush: "Finish / harvest window", drying: "Drying", curing: "Curing", done: "Done" };
 const STAGE_ORDER = ["germination", "seedling", "veg", "flower", "flush", "drying", "curing"];
 
+function plantedDate(p) { return evDate(p, "planted") || evDate(p, "popped") || baseDate(p); }
+function flowerDate(p) { return p.type === "auto" ? (evDate(p, "first_pistils") || null) : (evDate(p, "flip") || null); }
+function dayWeek(from, d = today()) { if (!from) return null; const n = diff(d, from) + 1; return { day: n, week: Math.ceil(n / 7) }; }
+const SOURCES = ["Seed bank (online)", "Breeder", "Dispensary", "Clone from a friend", "Bag seed", "Other"];
+const ALLPRODUCTS = ["bigBloom", "growBig", "tigerBloom", "openSesame", "beastie", "chaChing", "sledge"];
+function nutrientTotals(p) {
+  const T = {};
+  (p.logs || []).forEach(l => (l.nutrients || []).forEach(n => { const t = T[n.k] = T[n.k] || { k: n.k, uses: 0, tsp: 0 }; t.uses++; t.tsp += n.tsp; }));
+  return ALLPRODUCTS.filter(k => T[k]).map(k => ({ ...T[k], name: C.foxfarm.products[k].name, ml: T[k].tsp * 4.929 }));
+}
 function weekLabel(p, d = today()) {
   const st = stage(p, d), n = dayNum(p, d);
   if (st === "flower" || st === "flush") {
@@ -181,6 +191,25 @@ function db() { if (!dbP) dbP = new Promise((res, rej) => { try { const r = inde
 async function photoPut(rec) { const d = await db(); return new Promise((res, rej) => { const tx = d.transaction("photos", "readwrite"); tx.objectStore("photos").put(rec); tx.oncomplete = res; tx.onerror = () => rej(tx.error); }); }
 async function photoAll(pid) { try { const d = await db(); return await new Promise((res) => { const r = d.transaction("photos").objectStore("photos").getAll(); r.onsuccess = () => res(r.result.filter(x => x.plantId === pid).sort((a, b) => b.date.localeCompare(a.date))); r.onerror = () => res([]); }); } catch (e) { return []; } }
 async function photoDel(id) { const d = await db(); return new Promise(res => { const tx = d.transaction("photos", "readwrite"); tx.objectStore("photos").delete(id); tx.oncomplete = res; }); }
+async function photoAllRaw() { try { const d = await db(); return await new Promise(res => { const r = d.transaction("photos").objectStore("photos").getAll(); r.onsuccess = () => res(r.result); r.onerror = () => res([]); }); } catch (e) { return []; } }
+async function backupToPhone(withPhotos) {
+  const data = { app: "growlog", version: 2, exported: new Date().toISOString(), plants: S.plants, settings: S.settings };
+  if (withPhotos) data.photos = await photoAllRaw();
+  const name = `growlog-backup-${iso(today())}${withPhotos ? "-with-photos" : ""}.json`;
+  const file = new File([JSON.stringify(data)], name, { type: "application/json" });
+  let shared = false;
+  try { if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: "GrowLog backup", text: "GrowLog backup " + iso(today()) }); shared = true; } } catch (e) { if (e && e.name === "AbortError") return toast("Backup cancelled"); }
+  if (!shared) { const u = URL.createObjectURL(file); const l = document.createElement("a"); l.href = u; l.download = name; l.click(); setTimeout(() => URL.revokeObjectURL(u), 1500); }
+  S.lastBackup = new Date().toISOString(); save(); render(); toast(shared ? "Backup shared – save it to Files / Drive" : "Backup downloaded to your phone");
+}
+async function restoreBackup(fileObj) {
+  const j = JSON.parse(await fileObj.text()); if (!Array.isArray(j.plants)) throw new Error("bad");
+  if (!confirm(`Restore ${j.plants.length} plant(s)${j.photos ? ` and ${j.photos.length} photo(s)` : ""} from ${j.exported ? j.exported.slice(0, 10) : "this backup"}? This replaces what's on this device now.`)) return;
+  S.plants = j.plants; S.settings = Object.assign(S.settings, j.settings || {}); S.current = null;
+  if (Array.isArray(j.photos)) for (const ph of j.photos) await photoPut(ph);
+  save(); render(); toast("Backup restored");
+}
+function backupAgeDays() { return S.lastBackup ? diff(today(), parse(S.lastBackup.slice(0, 10))) : null; }
 function compress(file) { return new Promise((res, rej) => { const img = new Image(); img.onload = () => { const s = Math.min(1, 1000 / Math.max(img.width, img.height)); const c = document.createElement("canvas"); c.width = img.width * s; c.height = img.height * s; c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); res(c.toDataURL("image/jpeg", 0.72)); URL.revokeObjectURL(img.src); }; img.onerror = rej; img.src = URL.createObjectURL(file); }); }
 
 /* ---------------- leaf illustrations ---------------- */
@@ -223,7 +252,7 @@ function photoBlock(key) { const ph = C.photos[key]; if (!ph) return ""; return 
 
 /* ---------------- UI helpers ---------------- */
 function toast(m) { const t = $("#toast"); t.textContent = m; t.classList.add("on"); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove("on"), 1800); }
-const TABS = [["today", "Today"], ["weeks", "Week by week"], ["calendar", "Calendar"], ["feed", "Feeding"], ["train", "Training"], ["tent", "Tent"], ["look", "Healthy vs Problems"], ["yield", "Yield"], ["plant", "Plant log"], ["settings", "Settings"]];
+const TABS = [["today", "Today"], ["plants", "My plants"], ["weeks", "Week by week"], ["calendar", "Calendar"], ["feed", "Feeding"], ["train", "Training"], ["tent", "Tent"], ["look", "Healthy vs Problems"], ["yield", "Yield"], ["plant", "Plant log"], ["report", "Print / Export"], ["settings", "Settings"]];
 function renderNav() { $("#nav").innerHTML = TABS.map(([k, l]) => `<button data-tab="${k}" class="${S.tab === k ? "on" : ""}">${l}</button>`).join(""); }
 function renderPick() {
   const sel = $("#plantPick");
@@ -249,7 +278,9 @@ V.today = () => {
   const all = S.plants.flatMap(p => tasksFor(p, 7)).sort((a, b) => a.date - b.date);
   const overdue = all.filter(x => x.date < t0), now = all.filter(x => diff(x.date, t0) === 0), soon = all.filter(x => diff(x.date, t0) > 0);
   const taskHtml = list => list.map(x => `<div class="task"><div class="dot ${x.level}"></div><div style="flex:1"><div class="row between"><b>${esc(x.title)}</b><span class="small muted">${x.date < t0 ? "overdue · " : ""}${fmt(x.date)}</span></div><div class="small muted">${esc(x.plant.name)} — ${esc(x.body)}</div></div>${x.tab ? `<button class="btn sm ghost" data-tab="${x.tab}">Open</button>` : ""}</div>`).join("");
-  return `<h1>Today · ${fmtLong(t0)}</h1>
+  const age = backupAgeDays();
+  const banner = (age === null || age >= 7) ? `<div class="card" style="border-color:var(--warn);margin-bottom:12px"><div class="row between"><div><b>💾 ${age === null ? "You haven't backed up yet" : `Last backup was ${age} days ago`}</b><div class="small muted">Save a copy of your grow to your phone so you never lose it.</div></div><button class="btn sm pri" data-act="backupPhone">Back up now</button></div></div>` : "";
+  return `${banner}<h1>Today · ${fmtLong(t0)}</h1>
   <div class="grid g2">
     ${S.plants.map(p => plantCard(p)).join("")}
   </div>
@@ -563,7 +594,7 @@ V.plant = () => {
   const logs = (p.logs || []).slice().sort((a, b) => b.date.localeCompare(a.date));
   setTimeout(async () => { const ph = await photoAll(p.id); const el = $("#thumbs"); if (el) el.innerHTML = ph.length ? ph.map(x => `<div><img src="${x.data}" alt=""><div class="row between small muted"><span>${fmt(parse(x.date))}${baseDate(p) ? " · d" + (diff(parse(x.date), baseDate(p)) + 1) : ""}</span><button class="btn sm ghost danger" data-act="delPhoto" data-ph="${x.id}">×</button></div></div>`).join("") : `<p class="muted small">No photos yet. Take one every few days to see progress.</p>`; }, 0);
   return `<div class="row between"><h1>${esc(p.name)}</h1><div class="row"><button class="btn sm" data-act="editPlant" data-id="${p.id}">Edit</button><button class="btn sm danger" data-act="delPlant" data-id="${p.id}">Delete</button></div></div>
-  <div class="card"><div class="row between"><div class="small muted">${esc(p.strain || "Unknown strain")} · ${p.type === "auto" ? "Autoflower" : "Photoperiod"} · ${p.pot || "?"} gal · ${({ oceanforest: "Ocean Forest", happyfrog: "Happy Frog", other: "Other soil" })[p.soil] || ""}</div>${stagePill(p)}</div>${stageBar(p)}<b>${weekLabel(p)}</b>
+  <div class="card"><div class="row between"><div class="small muted">${esc(p.strain || "Unknown strain")} · ${p.type === "auto" ? "Autoflower" : "Photoperiod"} · ${p.pot || "?"} gal · ${({ oceanforest: "Ocean Forest", happyfrog: "Happy Frog", other: "Other soil" })[p.soil] || ""}</div>${stagePill(p)}</div>${stageBar(p)}<b>${weekLabel(p)}</b>${plantedDate(p) ? ` <span class="small muted">· ${dayWeek(plantedDate(p)).day} days since planted (week ${dayWeek(plantedDate(p)).week})</span>` : ""}${p.source || p.sourceType ? `<div class="small muted">From: ${esc(p.sourceType || "")}${p.source ? " · " + esc(p.source) : ""}</div>` : ""}
   <div class="row" style="margin-top:10px"><button class="btn sm pri" data-act="logWater" data-id="${p.id}">💧 Log watering / test</button><button class="btn sm" data-act="logEvent" data-id="${p.id}">📅 Log milestone</button><label class="btn sm" style="margin:0;color:var(--ink)">📷 Add photo<input type="file" accept="image/*" capture="environment" id="photoIn" class="hide"></label></div></div>
   <h2>Milestones</h2>${timeline(p)}
   <h2>Photo journal</h2><div class="card"><div class="thumbs" id="thumbs">Loading…</div></div>
@@ -573,15 +604,120 @@ V.plant = () => {
   </tbody></table></div>`;
 };
 
+V.plants = () => {
+  if (!S.plants.length) return noPlants();
+  return `<div class="row between"><h1>My plants (${S.plants.length})</h1><div class="row"><button class="btn sm pri" data-act="addPlant">+ Add plant</button><button class="btn sm" data-tab="report">🖨 Print / Export</button></div></div>
+  <div class="grid g2">${S.plants.map(p => {
+    const pl = plantedDate(p), fl = flowerDate(p), dw = dayWeek(pl), fdw = fl ? dayWeek(fl) : null, hv = evDate(p, "harvest"), h = p.harvest || {};
+    const end = hv || today(), tot = pl ? diff(end, pl) + 1 : null;
+    return `<div class="card">
+      <div class="row between"><div><h3 style="margin:0">${esc(p.name)}</h3><div class="small muted">${esc(p.strain || "Unknown strain")} · ${p.type === "auto" ? "Auto" : "Photo"}</div></div>${stagePill(p)}</div>
+      ${stageBar(p)}
+      <table class="small" style="margin-top:4px"><tbody>
+        <tr><td class="muted">From</td><td>${esc(p.sourceType || "—")}${p.source ? " · " + esc(p.source) : ""}</td></tr>
+        <tr><td class="muted">Planted</td><td>${pl ? fmtLong(pl) : "—"}</td></tr>
+        <tr><td class="muted">${hv ? "Grow length" : "Today"}</td><td><b>${dw ? (hv ? `${tot} days (${Math.ceil(tot / 7)} weeks)` : `Day ${dw.day} · Week ${dw.week}`) : "Not planted yet"}</b></td></tr>
+        <tr><td class="muted">Flowered</td><td>${fl ? fmtLong(fl) + (hv ? ` · ${diff(hv, fl)} days in flower` : ` · flower day ${fdw.day} (week ${fdw.week})`) : "—"}</td></tr>
+        <tr><td class="muted">Weight</td><td>${h.wet || h.dry ? `${h.wet ? h.wet + " g wet" : ""}${h.wet && h.dry ? " · " : ""}${h.dry ? h.dry + " g dry" : ""}` : "—"}</td></tr>
+      </tbody></table>
+      <div class="row" style="margin-top:8px"><button class="btn sm" data-act="openPlant" data-id="${p.id}">Open</button><button class="btn sm" data-act="editPlant" data-id="${p.id}">✏️ Rename / edit</button><button class="btn sm" data-act="logEvent" data-id="${p.id}">📅 Milestone</button><button class="btn sm" data-act="printOne" data-id="${p.id}">🖨 Print</button></div>
+    </div>`; }).join("")}</div>`;
+};
+
+function reportPlant(p) {
+  const pl = plantedDate(p), fl = flowerDate(p), hv = evDate(p, "harvest"), h = p.harvest || {}, b = baseDate(p);
+  const end = hv || today(); const tot = pl ? diff(end, pl) + 1 : null;
+  const veg = b && fl ? diff(fl, b) : null, flw = fl ? diff(end, fl) + (hv ? 0 : 1) : null;
+  const dwStr = d => { if (!pl || d < pl) return "—"; const x = dayWeek(pl, d); return `D${x.day} / W${x.week}`; };
+  const nt = nutrientTotals(p);
+  const evs = (p.events || []).slice().sort((a, c) => a.date.localeCompare(c.date));
+  const logs = (p.logs || []).slice().sort((a, c) => a.date.localeCompare(c.date));
+  const row = (k, v) => `<tr><th style="width:38%">${k}</th><td>${v}</td></tr>`;
+  return `<section class="report card">
+    <div class="row between"><div><h2 style="margin:0">${esc(p.name)}</h2><div class="muted">${esc(p.strain || "Unknown strain")} · ${p.type === "auto" ? "Autoflower" : "Photoperiod"}</div></div><div class="small muted">Report printed ${fmtLong(today())}</div></div>
+    <div class="grid g2" style="margin-top:10px">
+      <table><tbody>
+        ${row("Where it came from", esc(p.sourceType || "—") + (p.source ? " · " + esc(p.source) : ""))}
+        ${row("Germination started", evDate(p, "germ_start") ? fmtLong(evDate(p, "germ_start")) : "—")}
+        ${row("Seed popped", evDate(p, "popped") ? fmtLong(evDate(p, "popped")) : "—")}
+        ${row("Planted", evDate(p, "planted") ? fmtLong(evDate(p, "planted")) : pl ? fmtLong(pl) + " (est.)" : "—")}
+        ${row("Sprouted", evDate(p, "sprouted") ? fmtLong(evDate(p, "sprouted")) : "—")}
+        ${row(p.type === "auto" ? "Flowered (first pistils)" : "Flowered (flipped 12/12)", fl ? fmtLong(fl) : "—")}
+        ${row("Harvested", hv ? fmtLong(hv) : "—")}
+      </tbody></table>
+      <table><tbody>
+        ${row(hv ? "Total days planted → harvest" : "Days since planted", tot ? `${tot} days (week ${Math.ceil(tot / 7)})` : "—")}
+        ${row("Days in veg", veg != null ? `${veg} days (${(veg / 7).toFixed(1)} wks)` : "—")}
+        ${row("Days in flower", flw != null ? `${flw} days (${(flw / 7).toFixed(1)} wks)` : "—")}
+        ${row("Soil / pot", `${({ oceanforest: "FoxFarm Ocean Forest", happyfrog: "FoxFarm Happy Frog", other: "Other" })[p.soil] || "—"} · ${p.pot || "?"} gal`)}
+        ${row("Wet weight", h.wet ? `${h.wet} g (${(h.wet / 28.35).toFixed(2)} oz)` : "—")}
+        ${row("Dry weight", h.dry ? `${h.dry} g (${(h.dry / 28.35).toFixed(2)} oz)` : "—")}
+        ${row("Dry ÷ wet", h.wet && h.dry ? Math.round(h.dry / h.wet * 100) + "%" : "—")}
+      </tbody></table>
+    </div>
+    <h3 style="margin-top:14px">Nutrients added (FoxFarm totals)</h3>
+    <table><thead><tr><th>Product</th><th>Feedings</th><th>Total</th><th>Total mL</th></tr></thead><tbody>
+      ${nt.map(n => `<tr><td>${n.name}</td><td>${n.uses}</td><td>${tspFmt(n.tsp)}</td><td>${n.ml.toFixed(1)}</td></tr>`).join("") || `<tr><td colspan="4" class="muted">No nutrient feedings logged yet.</td></tr>`}
+    </tbody></table>
+    <h3 style="margin-top:14px">Milestones</h3>
+    <table><thead><tr><th>Date</th><th>Day / Week</th><th>Event</th><th>Notes</th></tr></thead><tbody>
+      ${evs.map(e => `<tr><td>${fmt(parse(e.date))}</td><td>${dwStr(parse(e.date))}</td><td>${EVMAP[e.type]?.e || ""} ${esc(EVMAP[e.type]?.l || e.type)}</td><td>${esc(e.note || "")}</td></tr>`).join("") || `<tr><td colspan="4" class="muted">None logged.</td></tr>`}
+    </tbody></table>
+    <h3 style="margin-top:14px">Watering & feeding log</h3>
+    <table><thead><tr><th>Date</th><th>Day / Week</th><th>Type</th><th>Gal</th><th>Nutrients added</th><th>pH</th><th>PPM</th><th>Runoff pH/PPM</th></tr></thead><tbody>
+      ${logs.map(l => `<tr><td>${fmt(parse(l.date))}</td><td>${dwStr(parse(l.date))}</td><td>${l.kind === "feed" ? "Feed" : l.kind === "water" ? "Water" : "Test"}</td><td>${l.gal ?? ""}</td><td class="small">${esc(l.mix || "")}</td><td>${l.ph ?? ""}</td><td>${l.ppm ?? ""}</td><td>${l.rph ?? ""}${l.rppm ? " / " + l.rppm : ""}</td></tr>`).join("") || `<tr><td colspan="8" class="muted">No waterings logged.</td></tr>`}
+    </tbody></table>
+    ${p.notes ? `<h3 style="margin-top:14px">Notes</h3><p>${esc(p.notes)}</p>` : ""}
+  </section>`;
+}
+V.report = () => {
+  if (!S.plants.length) return noPlants();
+  const sel = S.reportSel && S.reportSel.length ? S.reportSel.filter(id => S.plants.some(p => p.id === id)) : S.plants.map(p => p.id);
+  return `<div class="noprint"><h1>Print / Export</h1>
+    <div class="card"><b>Pick plants to include</b>
+      <div class="chips" style="margin:8px 0">${S.plants.map(p => `<button data-act="repToggle" data-id="${p.id}" class="${sel.includes(p.id) ? "on" : ""}">${esc(p.name)}</button>`).join("")}</div>
+      <div class="row"><button class="btn pri" data-act="print">🖨 Print / Save as PDF</button><button class="btn" data-act="csvSummary">⬇ Summary spreadsheet (CSV)</button><button class="btn" data-act="csvLogs">⬇ Full feeding log (CSV)</button></div>
+      <p class="small muted" style="margin-bottom:0">Each plant prints on its own page. To get a PDF, choose "Save as PDF" in the print window.</p></div>
+    <h2>Preview</h2></div>
+  <div id="reportArea">${S.plants.filter(p => sel.includes(p.id)).map(reportPlant).join("")}</div>`;
+};
+function csv(rows) { return rows.map(r => r.map(v => { v = v == null ? "" : String(v); return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; }).join(",")).join("\n"); }
+function download(name, text, type = "text/csv") { const u = URL.createObjectURL(new Blob([text], { type })); const l = document.createElement("a"); l.href = u; l.download = name; l.click(); setTimeout(() => URL.revokeObjectURL(u), 1000); }
+function reportSelection() { return S.plants.filter(p => !S.reportSel || !S.reportSel.length || S.reportSel.includes(p.id)); }
+function csvSummary() {
+  const head = ["Name", "Strain", "Type", "Source", "Seller/breeder", "Germination", "Popped", "Planted", "Sprouted", "Flowered", "Harvested", "Days planted", "Weeks planted", "Days veg", "Days flower", "Wet g", "Dry g", ...ALLPRODUCTS.map(k => C.foxfarm.products[k].name + " total tsp")];
+  const rows = reportSelection().map(p => {
+    const pl = plantedDate(p), fl = flowerDate(p), hv = evDate(p, "harvest"), b = baseDate(p), end = hv || today(), tot = pl ? diff(end, pl) + 1 : "";
+    const nt = Object.fromEntries(nutrientTotals(p).map(n => [n.k, n.tsp.toFixed(2)]));
+    const d = t => evDate(p, t) ? iso(evDate(p, t)) : "";
+    return [p.name, p.strain, p.type, p.sourceType, p.source, d("germ_start"), d("popped"), d("planted"), d("sprouted"), fl ? iso(fl) : "", d("harvest"), tot, tot ? Math.ceil(tot / 7) : "", b && fl ? diff(fl, b) : "", fl ? diff(end, fl) : "", p.harvest?.wet || "", p.harvest?.dry || "", ...ALLPRODUCTS.map(k => nt[k] || "")];
+  });
+  download(`growlog-summary-${iso(today())}.csv`, csv([head, ...rows]));
+}
+function csvLogs() {
+  const head = ["Plant", "Date", "Day", "Week", "Type", "Gallons", ...ALLPRODUCTS.map(k => C.foxfarm.products[k].name + " tsp"), "pH in", "PPM in", "Runoff pH", "Runoff PPM", "Temp F", "RH %", "Notes"];
+  const rows = [];
+  reportSelection().forEach(p => { const pl = plantedDate(p); (p.logs || []).slice().sort((a, c) => a.date.localeCompare(c.date)).forEach(l => { const dw = pl ? dayWeek(pl, parse(l.date)) : null; const n = Object.fromEntries((l.nutrients || []).map(x => [x.k, x.tsp])); rows.push([p.name, l.date, dw?.day ?? "", dw?.week ?? "", l.kind, l.gal, ...ALLPRODUCTS.map(k => n[k] ?? ""), l.ph, l.ppm, l.rph, l.rppm, l.temp, l.rh, l.note]); }); });
+  download(`growlog-feeding-log-${iso(today())}.csv`, csv([head, ...rows]));
+}
+
 V.settings = () => `<h1>Settings</h1>
   <div class="card"><div class="form2">
     <div><label>AC Infinity tent size</label><select id="setTent">${Object.keys(C.tentSizes).map(k => `<option ${S.settings.tent === k ? "selected" : ""}>${k}</option>`).join("")}</select></div>
     <div><label>Light wattage (actual draw)</label><input type="number" id="setWatts" value="${S.settings.watts || ""}"></div>
     <div><label>Theme</label><select id="setTheme">${["auto", "light", "dark"].map(k => `<option ${S.settings.theme === k ? "selected" : ""}>${k}</option>`).join("")}</select></div>
   </div></div>
-  <h2>Backup</h2>
-  <div class="card"><p class="small muted">Your logs live in this browser only. Export a backup file now and then, and use Import to move it to another phone or computer. Photos stay on the device and aren't in the backup.</p>
-  <div class="row"><button class="btn pri" data-act="export">⬇ Export backup</button><label class="btn" style="margin:0;color:var(--ink)">⬆ Import backup<input type="file" accept="application/json" id="importIn" class="hide"></label><button class="btn danger" data-act="wipe">Erase all data</button></div></div>
+  <h2>Back up to this phone</h2>
+  <div class="card">
+    <p class="small" style="margin-top:0">Last backup: <b>${S.lastBackup ? fmtLong(parse(S.lastBackup.slice(0, 10))) : "never"}</b> · Storage protection: <b id="persistTag">checking…</b></p>
+    <div class="row"><button class="btn pri" data-act="backupPhone">💾 Back up to phone</button><button class="btn" data-act="backupPhotos">💾 Back up with photos</button><label class="btn" style="margin:0;color:var(--ink)">♻️ Restore from backup<input type="file" accept="application/json,.json" id="importIn" class="hide"></label></div>
+    <ul class="small muted" style="margin-bottom:0">
+      <li><b>iPhone:</b> tap Back up, then "Save to Files" (On My iPhone or iCloud Drive).</li>
+      <li><b>Android:</b> tap Back up, then pick Drive or Files. If no share menu appears, it saves to your Downloads folder.</li>
+      <li>To restore (new phone, or after clearing the browser), tap Restore and pick the backup file.</li>
+      <li>Install the app: iPhone Safari → Share → <b>Add to Home Screen</b>. Android Chrome → ⋮ → <b>Install app</b>. Your data stays put and it works offline.</li>
+    </ul></div>
+  <div class="row" style="margin-top:10px"><button class="btn danger sm" data-act="wipe">Erase all data on this device</button></div>
   <h2>About this content</h2>
   <div class="card small"><p>Content version ${C.version}, last reviewed ${C.lastReviewed}. The grow guide content is refreshed on a schedule.</p><ul>${C.sources.map(s => `<li><a href="${s.url}" target="_blank" rel="noopener">${esc(s.name)}</a></li>`).join("")}</ul></div>`;
 
@@ -597,18 +733,23 @@ function plantForm(p = {}) {
     <label>Name</label><input name="name" required value="${esc(p.name || "Plant " + (S.plants.length + 1))}">
     <label>Strain</label><input name="strain" value="${esc(p.strain || "")}" placeholder="e.g. Blue Dream">
     <div class="form2">
+      <div><label>Where it came from</label><select name="sourceType">${SOURCES.map(x => `<option ${p.sourceType === x ? "selected" : ""}>${x}</option>`).join("")}</select></div>
+      <div><label>Seller / breeder name</label><input name="source" value="${esc(p.source || "")}" placeholder="e.g. ILGM, Barney's Farm"></div>
+    </div>
+    <div class="form2">
       <div><label>Seed type</label><select name="type"><option value="photo" ${p.type !== "auto" ? "selected" : ""}>Photoperiod</option><option value="auto" ${p.type === "auto" ? "selected" : ""}>Autoflower</option></select></div>
       <div><label>FoxFarm soil</label><select name="soil">${[["oceanforest", "Ocean Forest"], ["happyfrog", "Happy Frog"], ["other", "Other / mix"]].map(([k, l]) => `<option value="${k}" ${p.soil === k ? "selected" : ""}>${l}</option>`).join("")}</select></div>
       <div><label>Final pot (gal)</label><input name="pot" type="number" step="0.5" value="${p.pot || 5}"></div>
       <div><label>Feeding strength %</label><input name="strength" type="number" min="25" max="100" step="5" value="${Math.round((p.strength || 0.5) * 100)}"></div>
       <div><label>Planned veg weeks (photo)</label><input name="vegWeeks" type="number" min="2" max="16" value="${p.vegWeeks || 5}"></div>
       <div><label>Flower weeks (photo, from breeder)</label><input name="flowerWeeks" type="number" min="6" max="16" value="${p.flowerWeeks || 9}"></div>
+      <div style="grid-column:1/-1"><label>Notes (prints on the report)</label><textarea name="notes">${esc(p.notes || "")}</textarea></div>
       <div><label>Seed-to-harvest days (auto)</label><input name="autoDays" type="number" min="55" max="120" value="${p.autoDays || 77}"></div>
-      ${isNew ? `<div><label>Germination started on</label><input name="germ" type="date" value=""></div>` : ""}
+      ${isNew ? `<div><label>Germination started on</label><input name="germ" type="date" value=""></div><div><label>Planted in soil on</label><input name="planted" type="date" value=""></div>` : ""}
     </div>`, fd => {
     const o = isNew ? { id: uid(), events: [], logs: [], created: iso(today()) } : p;
-    Object.assign(o, { name: fd.name.trim() || "Plant", strain: fd.strain.trim(), type: fd.type, soil: fd.soil, pot: +fd.pot, strength: Math.min(1, Math.max(.25, (+fd.strength || 50) / 100)), vegWeeks: +fd.vegWeeks, flowerWeeks: +fd.flowerWeeks, autoDays: +fd.autoDays });
-    if (isNew) { if (fd.germ) o.events.push({ id: uid(), type: "germ_start", date: fd.germ, note: "" }); S.plants.push(o); S.current = o.id; }
+    Object.assign(o, { name: fd.name.trim() || "Plant", strain: fd.strain.trim(), sourceType: fd.sourceType, source: fd.source.trim(), notes: (fd.notes || "").trim(), type: fd.type, soil: fd.soil, pot: +fd.pot, strength: Math.min(1, Math.max(.25, (+fd.strength || 50) / 100)), vegWeeks: +fd.vegWeeks, flowerWeeks: +fd.flowerWeeks, autoDays: +fd.autoDays });
+    if (isNew) { if (fd.germ) o.events.push({ id: uid(), type: "germ_start", date: fd.germ, note: "" }); if (fd.planted) o.events.push({ id: uid(), type: "planted", date: fd.planted, note: "" }); S.plants.push(o); S.current = o.id; }
     save(); render(); toast(isNew ? "Plant added" : "Saved");
   });
 }
@@ -641,9 +782,13 @@ function waterForm(p) {
       <div><label>Tent temp °F / RH %</label><div class="row" style="flex-wrap:nowrap"><input name="temp" type="number" placeholder="°F"><input name="rh" type="number" placeholder="%"></div></div>
     </div>
     ${mixTxt ? `<p class="small muted">Suggested mix (${Math.round(str * 100)}%): ${esc(mixTxt)}</p>` : `<p class="small muted">${esc(ch.why || "")}</p>`}
+    <details ${ch.plain ? "" : "open"}><summary class="small" style="cursor:pointer;font-weight:700">🧪 Nutrients actually added (total tsp for this batch, prefilled from the chart)</summary>
+    <div class="form2">${ALLPRODUCTS.map(k => { const r = ch.row && !ch.plain && ch.row[k] ? ch.row[k] * str * gal : ""; return `<div><label>${C.foxfarm.products[k].name}</label><input name="n_${k}" type="number" step="0.125" min="0" value="${r === "" ? "" : Math.round(r * 8) / 8}"></div>`; }).join("")}</div>
+    <p class="small muted">Only saved when Type = Nutrients. Change any number to match what you really poured in.</p></details>
     <label>Notes</label><textarea name="note" placeholder="leaf color, smells, anything odd"></textarea>`, fd => {
     const num = v => v === "" || v == null ? null : +v;
-    p.logs.push({ id: uid(), kind: fd.kind, date: fd.date, gal: num(fd.gal), ph: num(fd.ph), ppm: num(fd.ppm), rph: num(fd.rph), rppm: num(fd.rppm), temp: num(fd.temp), rh: num(fd.rh), note: fd.note.trim(), mix: fd.kind === "feed" ? mixTxt : "" });
+    p.logs.push({ id: uid(), kind: fd.kind, date: fd.date, gal: num(fd.gal), ph: num(fd.ph), ppm: num(fd.ppm), rph: num(fd.rph), rppm: num(fd.rppm), temp: num(fd.temp), rh: num(fd.rh), note: fd.note.trim(), mix: "", nutrients: fd.kind === "feed" ? ALLPRODUCTS.map(k => ({ k, tsp: +fd["n_" + k] || 0 })).filter(n => n.tsp > 0) : [] });
+    const L = p.logs[p.logs.length - 1]; L.mix = L.nutrients.map(n => `${C.foxfarm.products[n.k].name} ${tspFmt(n.tsp)}`).join(", ");
     const warn = [];
     if (num(fd.rph) && (num(fd.rph) < 6 || num(fd.rph) > 7)) warn.push("Runoff pH is out of range. See Feeding → When to test.");
     if (num(fd.ph) && (num(fd.ph) < 6.2 || num(fd.ph) > 7)) warn.push("Input pH should be 6.3–6.8 for soil.");
@@ -681,6 +826,13 @@ document.addEventListener("click", async e => {
   if (a === "editPlant") plantForm(p);
   if (a === "openPlant") { S.current = p.id; go("plant"); }
   if (a === "openWeeks") { S.current = p.id; go("weeks"); }
+  if (a === "printOne") { S.reportSel = [p.id]; go("report"); setTimeout(() => window.print(), 300); }
+  if (a === "repToggle") { let sel = S.reportSel && S.reportSel.length ? S.reportSel.slice() : S.plants.map(x => x.id); sel = sel.includes(p.id) ? sel.filter(x => x !== p.id) : [...sel, p.id]; S.reportSel = sel.length ? sel : [p.id]; save(); render(); }
+  if (a === "print") window.print();
+  if (a === "backupPhone") backupToPhone(false);
+  if (a === "backupPhotos") backupToPhone(true);
+  if (a === "csvSummary") csvSummary();
+  if (a === "csvLogs") csvLogs();
   if (a === "logEvent") eventForm(p || plant());
   if (a === "logWater") waterForm(p || plant());
   if (a === "harvestForm") harvestForm(p);
@@ -705,11 +857,17 @@ document.addEventListener("change", async e => {
   if (id === "setTheme") { S.settings.theme = e.target.value; save(); render(); }
   if (id === "calPlant") { S.calPlant = e.target.value; save(); render(); }
   if (id === "photoIn" && e.target.files[0]) { try { const data = await compress(e.target.files[0]); await photoPut({ id: uid(), plantId: p.id, date: iso(today()), data }); toast("Photo saved"); render(); } catch (err) { toast("Couldn't save photo"); } }
-  if (id === "importIn" && e.target.files[0]) { try { const j = JSON.parse(await e.target.files[0].text()); if (!Array.isArray(j.plants)) throw 0; if (!confirm(`Import ${j.plants.length} plant(s)? This replaces current data.`)) return; S.plants = j.plants; S.settings = Object.assign(S.settings, j.settings || {}); S.current = null; save(); render(); toast("Imported"); } catch (err) { toast("That file isn't a GrowLog backup"); } }
+  if (id === "importIn" && e.target.files[0]) { try { await restoreBackup(e.target.files[0]); } catch (err) { toast("That file isn't a GrowLog backup"); } e.target.value = ""; }
 });
 document.addEventListener("input", e => { if (e.target.id === "strength") $("#strLbl").textContent = e.target.value + "%"; });
 
 // expose a few internals for testing
+(async () => {
+  try { if (navigator.storage && navigator.storage.persist) { const ok = (await navigator.storage.persisted()) || (await navigator.storage.persist()); S._persist = ok; } } catch (e) {}
+  const tag = () => { const t = document.getElementById("persistTag"); if (t) t.textContent = S._persist ? "on ✓ (browser won't auto-clear it)" : "not granted – install to Home Screen and back up often"; };
+  tag(); new MutationObserver(tag).observe(document.getElementById("view"), { childList: true });
+})();
+if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
 window.__growlog = { chartFor, stage, tasksFor, mixFor, tspFmt, vpd, get S() { return S; } };
 render();
 })();

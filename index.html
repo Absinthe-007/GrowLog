@@ -7,6 +7,9 @@
 <meta name="theme-color" content="#0f1a14">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌱</text></svg>">
 <link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="GrowLog">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -107,6 +110,18 @@ footer{max-width:1100px;margin:30px auto;padding:0 16px 30px;color:var(--muted);
 .chips button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
 .thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px}
 .thumbs img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px}
+@media print{
+  header,footer,.noprint,nav,.toast,dialog{display:none!important}
+  body,html{background:#fff;color:#000;font-size:11pt}
+  :root{--panel:#fff;--panel2:#f3f3f3;--ink:#000;--muted:#555;--line:#ccc;--accentSoft:#eee;--accent2:#000}
+  main{padding:0;max-width:none}
+  .report{border:0;box-shadow:none;padding:0;page-break-after:always;break-after:page}
+  .report:last-child{page-break-after:auto;break-after:auto}
+  .report table{font-size:9.5pt} .report th,.report td{padding:3px 5px}
+  .grid.g2{grid-template-columns:1fr 1fr}
+}
+.report{margin-bottom:16px}
+.report table th{text-transform:none;letter-spacing:0;font-size:13px}
 </style>
 </head>
 <body>
@@ -121,7 +136,7 @@ footer{max-width:1100px;margin:30px auto;padding:0 16px 30px;color:var(--muted);
 </header>
 <main id="view"></main>
 <footer>
-  GrowLog keeps your data on this device (browser storage). Use Settings → Export to back it up.<br>
+  GrowLog keeps your data on this device (browser storage). Use Settings → Back up to phone to save a copy.<br>
   Feeding amounts come from FoxFarm's soil chart, which FoxFarm calls "recommendations only." Watch your plants and adjust. Photos are from Wikimedia Commons under their own licenses (credited on each photo).<br>
   Grow laws vary by state. Know the rules where you live.
 </footer>
