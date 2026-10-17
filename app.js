@@ -21,7 +21,13 @@ const fmtLong = d => d ? d.toLocaleDateString(undefined, { weekday: "short", mon
 const defaults = () => ({ plants: [], settings: { tent: "4x4", watts: 480, theme: "auto" }, current: null, tab: "today" });
 let S;
 try { S = Object.assign(defaults(), JSON.parse(localStorage.getItem(KEY) || "{}")); } catch (e) { S = defaults(); }
-const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast("Couldn't save – storage full or blocked"); } };
+const payload = () => ({ plants: S.plants, gear: S.gear || null, settings: S.settings });
+function hashStr(str) { let h = 5381; for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0; return String(h >>> 0); }
+const save = () => {
+  const h = hashStr(JSON.stringify(payload()));
+  if (h !== S.dataHash) { S.dataHash = h; S.updatedAt = Date.now(); try { Cloud.schedule(); } catch (e) {} }
+  try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast("Couldn't save – storage full or blocked"); }
+};
 const plant = () => S.plants.find(p => p.id === S.current) || S.plants[0] || null;
 /* ---------------- gear: tents & lights ---------------- */
 function gear() {
@@ -208,6 +214,7 @@ let dbP;
 function db() { if (!dbP) dbP = new Promise((res, rej) => { try { const r = indexedDB.open("growlog-photos", 1); r.onupgradeneeded = () => r.result.createObjectStore("photos", { keyPath: "id" }); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); } catch (e) { rej(e); } }); return dbP; }
 async function photoPut(rec) { const d = await db(); return new Promise((res, rej) => { const tx = d.transaction("photos", "readwrite"); tx.objectStore("photos").put(rec); tx.oncomplete = res; tx.onerror = () => rej(tx.error); }); }
 async function photoAll(pid) { try { const d = await db(); return await new Promise((res) => { const r = d.transaction("photos").objectStore("photos").getAll(); r.onsuccess = () => res(r.result.filter(x => x.plantId === pid).sort((a, b) => b.date.localeCompare(a.date))); r.onerror = () => res([]); }); } catch (e) { return []; } }
+async function photoGet(id) { try { const d = await db(); return await new Promise(res => { const r = d.transaction("photos").objectStore("photos").get(id); r.onsuccess = () => res(r.result); r.onerror = () => res(null); }); } catch (e) { return null; } }
 async function photoDel(id) { const d = await db(); return new Promise(res => { const tx = d.transaction("photos", "readwrite"); tx.objectStore("photos").delete(id); tx.oncomplete = res; }); }
 async function photoAllRaw() { try { const d = await db(); return await new Promise(res => { const r = d.transaction("photos").objectStore("photos").getAll(); r.onsuccess = () => res(r.result); r.onerror = () => res([]); }); } catch (e) { return []; } }
 async function backupToPhone(withPhotos) {
@@ -229,6 +236,91 @@ async function restoreBackup(fileObj) {
   save(); render(); toast("Backup restored");
 }
 function backupAgeDays() { return S.lastBackup ? diff(today(), parse(S.lastBackup.slice(0, 10))) : null; }
+/* ---------------- cloud sync (private GitHub repo) ---------------- */
+const Cloud = (() => {
+  const TK = "growlog.ghtoken";
+  let timer = null, busy = false, again = false;
+  const cfg = () => S.sync || (S.sync = { owner: "Absinthe-007", repo: "GrowLog-data", enabled: false });
+  const token = () => { try { return localStorage.getItem(TK) || ""; } catch (e) { return ""; } };
+  const setToken = t => { try { t ? localStorage.setItem(TK, t) : localStorage.removeItem(TK); } catch (e) {} };
+  const on = () => cfg().enabled && !!token();
+  const b64 = str => { const bytes = new TextEncoder().encode(str); let bin = ""; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(bin); };
+  const unb64 = b => new TextDecoder().decode(Uint8Array.from(atob(b.replace(/\n/g, "")), c => c.charCodeAt(0)));
+  async function api(path, opts = {}) {
+    const c = cfg();
+    const r = await fetch(`https://api.github.com/repos/${c.owner}/${c.repo}/${path}`, { ...opts, cache: "no-store", headers: { Authorization: "Bearer " + token(), Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", ...(opts.body ? { "Content-Type": "application/json" } : {}) } });
+    if (r.status === 404) return { status: 404, json: null };
+    const json = await r.json().catch(() => null);
+    if (!r.ok) { const err = new Error((json && json.message) || ("HTTP " + r.status)); err.status = r.status; throw err; }
+    return { status: r.status, json };
+  }
+  function setStatus(state, msg) { S._sync = { state, msg, at: Date.now() }; const el = document.getElementById("syncPill"); if (el) paintPill(el); const st = document.getElementById("syncStatus"); if (st) st.textContent = msg; }
+  function paintPill(el) { const x = S._sync || {}; if (!on()) { el.className = "pill"; el.textContent = "☁️ off"; el.title = "Cloud sync is off – Settings → Cloud sync"; return; } el.className = "pill " + ({ ok: "g", busy: "", err: "b", pending: "w" }[x.state] || ""); el.textContent = { ok: "☁️ synced", busy: "☁️ syncing…", err: "☁️ error", pending: "☁️ saving…" }[x.state] || "☁️ on"; el.title = x.msg || ""; }
+  function schedule() { if (!on()) return; setStatus("pending", "Changes waiting to upload…"); clearTimeout(timer); timer = setTimeout(() => sync(), 4000); }
+  function applyRemote(doc) {
+    S.plants = doc.plants || []; S.gear = doc.gear || null; S.settings = Object.assign(S.settings || {}, doc.settings || {});
+    S.updatedAt = doc.updatedAt; S.lastSyncedAt = doc.updatedAt; S.dataHash = hashStr(JSON.stringify(payload()));
+    try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {}
+    render();
+  }
+  async function pushDoc(sha) {
+    const doc = { app: "growlog", format: 1, updatedAt: S.updatedAt || Date.now(), device: navigator.userAgent.slice(0, 80), ...payload() };
+    const r = await api("contents/growlog.json", { method: "PUT", body: JSON.stringify({ message: `GrowLog sync ${new Date().toISOString()}`, content: b64(JSON.stringify(doc, null, 1)), ...(sha ? { sha } : {}) }) });
+    S.lastSyncedAt = doc.updatedAt; S.remoteSha = r.json && r.json.content && r.json.content.sha;
+  }
+  async function syncPhotos() {
+    const local = await photoAllRaw();
+    let remote = [];
+    try { const r = await api("contents/photos"); remote = Array.isArray(r.json) ? r.json : []; } catch (e) { if (e.status !== 404) throw e; }
+    const remoteNames = new Set(remote.map(f => f.name));
+    // upload new local photos
+    for (const ph of local) {
+      const name = `${ph.plantId}__${ph.date}__${ph.id}.jpg`;
+      if (remoteNames.has(name)) { if (!ph.synced) { ph.synced = true; await photoPut(ph); } continue; }
+      if (ph.synced) continue; // was deleted in the cloud from another device
+      await api("contents/photos/" + encodeURIComponent(name), { method: "PUT", body: JSON.stringify({ message: "GrowLog photo", content: ph.data.split(",")[1] }) });
+      ph.synced = true; await photoPut(ph);
+    }
+    // download photos we don't have
+    const have = new Set(local.map(x => x.id));
+    for (const f of remote) {
+      const m = f.name.match(/^(.+?)__(\d{4}-\d{2}-\d{2})__(.+)\.jpg$/); if (!m || have.has(m[3])) continue;
+      const r = await api("contents/photos/" + encodeURIComponent(f.name));
+      if (r.json && r.json.content) await photoPut({ id: m[3], plantId: m[1], date: m[2], data: "data:image/jpeg;base64," + r.json.content.replace(/\n/g, ""), synced: true });
+    }
+  }
+  async function deletePhoto(id) {
+    if (!on()) return;
+    try { const r = await api("contents/photos"); const f = (r.json || []).find(x => x.name.endsWith(`__${id}.jpg`)); if (f) await api("contents/photos/" + encodeURIComponent(f.name), { method: "DELETE", body: JSON.stringify({ message: "GrowLog photo deleted", sha: f.sha }) }); } catch (e) {}
+  }
+  async function sync(opts = {}) {
+    if (!on()) return false;
+    if (busy) { again = true; return; }
+    busy = true; setStatus("busy", "Syncing with GitHub…");
+    try {
+      const r = await api("contents/growlog.json");
+      const remote = r.json && r.json.content ? JSON.parse(unb64(r.json.content)) : null;
+      const sha = r.json && r.json.sha;
+      const localChanged = (S.updatedAt || 0) > (S.lastSyncedAt || 0);
+      const remoteChanged = remote && remote.updatedAt > (S.lastSyncedAt || 0);
+      if (!remote) { await pushDoc(null); }
+      else if (remoteChanged && localChanged && remote.updatedAt !== S.updatedAt) {
+        const useCloud = confirm(`GrowLog: this device and the cloud BOTH have changes.\n\nCloud copy saved ${new Date(remote.updatedAt).toLocaleString()}\nThis device changed ${new Date(S.updatedAt).toLocaleString()}\n\nOK = use the CLOUD copy\nCancel = keep THIS DEVICE and upload it`);
+        if (useCloud) applyRemote(remote); else await pushDoc(sha);
+      } else if (remoteChanged) { applyRemote(remote); if (!opts.quiet) toast("Pulled latest from the cloud"); }
+      else if (localChanged) { await pushDoc(sha); }
+      try { await syncPhotos(); } catch (e) { console.warn("photo sync", e); }
+      S.lastSyncOk = Date.now(); try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {}
+      setStatus("ok", "Synced " + new Date().toLocaleTimeString());
+      return true;
+    } catch (e) {
+      const msg = e.status === 401 ? "GitHub key is invalid or expired" : e.status === 403 ? "GitHub key doesn't have access to this repo (needs Contents: read & write)" : e.status === 404 ? "Repo not found – check the owner/repo name and key access" : (navigator.onLine === false ? "Offline – will sync when you're back online" : "Sync failed: " + e.message);
+      setStatus("err", msg); return false;
+    } finally { busy = false; if (again) { again = false; setTimeout(() => sync({ quiet: true }), 500); } }
+  }
+  async function test() { const r = await fetch(`https://api.github.com/repos/${cfg().owner}/${cfg().repo}`, { headers: { Authorization: "Bearer " + token(), Accept: "application/vnd.github+json" } }); const j = await r.json().catch(() => ({})); if (!r.ok) throw Object.assign(new Error(j.message || r.status), { status: r.status }); return j; }
+  return { cfg, token, setToken, on, schedule, sync, test, paintPill, deletePhoto };
+})();
 function compress(file) { return new Promise((res, rej) => { const img = new Image(); img.onload = () => { const s = Math.min(1, 1000 / Math.max(img.width, img.height)); const c = document.createElement("canvas"); c.width = img.width * s; c.height = img.height * s; c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); res(c.toDataURL("image/jpeg", 0.72)); URL.revokeObjectURL(img.src); }; img.onerror = rej; img.src = URL.createObjectURL(file); }); }
 
 /* ---------------- leaf illustrations ---------------- */
@@ -738,6 +830,21 @@ V.settings = () => `<h1>Settings</h1>
     <div><label>Tents & lights</label><button class="btn" data-tab="tent">⛺ Manage tents & lights</button></div>
     <div><label>Theme</label><select id="setTheme">${["auto", "light", "dark"].map(k => `<option ${S.settings.theme === k ? "selected" : ""}>${k}</option>`).join("")}</select></div>
   </div></div>
+  <h2>☁️ Cloud sync (private GitHub repo)</h2>
+  <div class="card">
+    ${Cloud.on() ? `<p style="margin-top:0">✅ <b>Connected</b> to <code>${esc(Cloud.cfg().owner)}/${esc(Cloud.cfg().repo)}</code>. Everything saves to the cloud automatically a few seconds after each change.<br><span class="small muted" id="syncStatus">${esc((S._sync || {}).msg || (S.lastSyncOk ? "Last synced " + new Date(S.lastSyncOk).toLocaleString() : ""))}</span></p>
+      <div class="row"><button class="btn pri" data-act="syncNow">🔄 Sync now</button><button class="btn danger" data-act="syncOff">Disconnect this device</button></div>`
+    : `<p class="small" style="margin-top:0">Save your grow to your own <b>private</b> GitHub repo so it syncs between your phone and computer and survives a lost phone. One-time setup on each device:</p>
+      <ol class="small">
+        <li>On GitHub, open <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Settings → Developer settings → Fine-grained tokens → Generate new token</a>.</li>
+        <li>Name it "GrowLog". Under <b>Repository access</b> choose <b>Only select repositories</b> → <b>GrowLog-data</b>.</li>
+        <li>Under <b>Permissions → Repository permissions</b> set <b>Contents</b> to <b>Read and write</b>. Then click <b>Generate token</b> and copy it.</li>
+        <li>Paste it below and tap Connect. The key stays on this device only (it's never put in backups or the cloud file).</li>
+      </ol>
+      <div class="form2"><div><label>GitHub owner</label><input id="syncOwner" value="${esc(Cloud.cfg().owner)}"></div><div><label>Data repo (private)</label><input id="syncRepo" value="${esc(Cloud.cfg().repo)}"></div></div>
+      <label>GitHub access key (token)</label><input id="syncToken" type="password" autocomplete="off" placeholder="github_pat_…">
+      <div class="row" style="margin-top:10px"><button class="btn pri" data-act="syncConnect">☁️ Connect</button></div>`}
+  </div>
   <h2>Back up to this phone</h2>
   <div class="card">
     <p class="small" style="margin-top:0">Last backup: <b>${S.lastBackup ? fmtLong(parse(S.lastBackup.slice(0, 10))) : "never"}</b> · Storage protection: <b id="persistTag">checking…</b></p>
@@ -876,6 +983,7 @@ function render() {
   gear(); S.plants.forEach(p => { if (!tentById(p.tentId)) p.tentId = gear().tents[0].id; });
   renderNav(); renderPick(); applyTheme();
   $("#verTag").textContent = "v" + C.version;
+  const sp = $("#syncPill"); if (sp) { Cloud.paintPill(sp); sp.onclick = () => go("settings"); }
   $("#view").innerHTML = (V[S.tab] || V.today)();
   if (S.tab === "weeks" && !render._noScroll) { const h = $("#hereWk"); if (h) setTimeout(() => h.scrollIntoView({ block: "start", behavior: "smooth" }), 50); }
   if (S.tab === "tent") { ["vT", "vR", "vL"].forEach(id => $("#" + id).addEventListener("input", vpdUpdate)); vpdUpdate(); }
@@ -893,6 +1001,15 @@ document.addEventListener("click", async e => {
   if (a === "repToggle") { let sel = S.reportSel && S.reportSel.length ? S.reportSel.slice() : S.plants.map(x => x.id); sel = sel.includes(p.id) ? sel.filter(x => x !== p.id) : [...sel, p.id]; S.reportSel = sel.length ? sel : [p.id]; save(); render(); }
   if (a === "print") window.print();
   if (a === "backupPhone") backupToPhone(false);
+  if (a === "syncConnect") {
+    const tok = ($("#syncToken").value || "").trim(); if (!tok) return toast("Paste your GitHub key first");
+    Object.assign(Cloud.cfg(), { owner: $("#syncOwner").value.trim() || "Absinthe-007", repo: $("#syncRepo").value.trim() || "GrowLog-data" });
+    Cloud.setToken(tok);
+    try { const info = await Cloud.test(); if (!info.private && !confirm("Heads up: that repo is PUBLIC, so anyone could see your grow data. Connect anyway?")) { Cloud.setToken(""); return; } Cloud.cfg().enabled = true; S.lastSyncedAt = S.lastSyncedAt || 0; save(); render(); toast("Connected – syncing…"); await Cloud.sync(); render(); }
+    catch (err) { Cloud.setToken(""); toast(err.status === 401 ? "That key didn't work – check it and try again" : err.status === 404 ? "Can't see that repo with this key" : "Couldn't connect: " + err.message); }
+  }
+  if (a === "syncNow") { const ok = await Cloud.sync(); toast(ok ? "Synced ✓" : (S._sync || {}).msg || "Sync failed"); render(); }
+  if (a === "syncOff" && confirm("Disconnect cloud sync on this device? Your data stays here and in the cloud.")) { Cloud.setToken(""); Cloud.cfg().enabled = false; save(); render(); }
   if (a === "addTent") tentForm();
   if (a === "editTent") tentForm(tentById(t.dataset.t));
   if (a === "pickTent") { S.activeTent = t.dataset.t; S.tab = "tent"; save(); render(); }
@@ -909,7 +1026,7 @@ document.addEventListener("click", async e => {
   if (a === "delPlant" && confirm(`Delete ${p.name} and all its logs?`)) { S.plants = S.plants.filter(x => x !== p); save(); render(); }
   if (a === "delEvent") { p.events = p.events.filter(x => x.id !== t.dataset.ev); save(); render(); }
   if (a === "delLog") { p.logs = p.logs.filter(x => x.id !== t.dataset.log); save(); render(); }
-  if (a === "delPhoto" && confirm("Delete this photo?")) { await photoDel(t.dataset.ph); render(); }
+  if (a === "delPhoto" && confirm("Delete this photo?")) { await photoDel(t.dataset.ph); Cloud.deletePhoto(t.dataset.ph); render(); }
   if (a === "calPrev" || a === "calNext") { const m = S.calMonth ? parse(S.calMonth) : new Date(today().getFullYear(), today().getMonth(), 1); S.calMonth = iso(new Date(m.getFullYear(), m.getMonth() + (a === "calNext" ? 1 : -1), 1)); save(); render(); }
   if (a === "calDay") { const k = t.dataset.d, its = (V._calItems || {})[k] || []; $("#dayDetail").innerHTML = `<b>${fmtLong(parse(k))}</b><div style="margin-top:6px;display:grid;gap:4px">${its.length ? its.join("").replace(/class="ev/g, 'style="white-space:normal;font-size:13px" class="ev') : '<span class="muted small">Nothing logged or projected.</span>'}</div>`; $("#dayDetail").scrollIntoView({ block: "nearest", behavior: "smooth" }); }
   if (a === "calToday") { S.calMonth = null; save(); render(); }
@@ -927,7 +1044,7 @@ document.addEventListener("change", async e => {
   if (id === "lightModel") { const o = e.target.selectedOptions[0]; if (o && o.dataset.watts) { $("#lWatts").value = o.dataset.watts; if (!$("#lName").value) $("#lName").value = o.value.replace("AC Infinity ", ""); if (!$("#lNote").value) $("#lNote").value = o.dataset.note; } }
   if (id === "setTheme") { S.settings.theme = e.target.value; save(); render(); }
   if (id === "calPlant") { S.calPlant = e.target.value; save(); render(); }
-  if (id === "photoIn" && e.target.files[0]) { try { const data = await compress(e.target.files[0]); await photoPut({ id: uid(), plantId: p.id, date: iso(today()), data }); toast("Photo saved"); render(); } catch (err) { toast("Couldn't save photo"); } }
+  if (id === "photoIn" && e.target.files[0]) { try { const data = await compress(e.target.files[0]); await photoPut({ id: uid(), plantId: p.id, date: iso(today()), data }); toast("Photo saved"); render(); Cloud.schedule(); } catch (err) { toast("Couldn't save photo"); } }
   if (id === "importIn" && e.target.files[0]) { try { await restoreBackup(e.target.files[0]); } catch (err) { toast("That file isn't a GrowLog backup"); } e.target.value = ""; }
 });
 document.addEventListener("input", e => { if (e.target.id === "strength") $("#strLbl").textContent = e.target.value + "%"; });
@@ -941,4 +1058,8 @@ document.addEventListener("input", e => { if (e.target.id === "strength") $("#st
 if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
 window.__growlog = { chartFor, stage, tasksFor, mixFor, tspFmt, vpd, get S() { return S; } };
 render();
+if (Cloud.on()) Cloud.sync({ quiet: true });
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && Cloud.on()) Cloud.sync({ quiet: true }); });
+window.addEventListener("online", () => { if (Cloud.on()) Cloud.sync({ quiet: true }); });
+setInterval(() => { if (Cloud.on() && document.visibilityState === "visible") Cloud.sync({ quiet: true }); }, 120000);
 })();
