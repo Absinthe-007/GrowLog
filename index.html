@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GrowLog – Seed to Harvest</title>
+<meta name="theme-color" content="#0f1a14">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌱</text></svg>">
+<link rel="manifest" href="manifest.json">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f5f7f4;--panel:#ffffff;--panel2:#eef3ec;--ink:#13201a;--muted:#5d6b63;--line:#dbe3dc;
+  --accent:#2f9e44;--accent2:#1c7c33;--accentSoft:#e3f4e6;--warn:#e8590c;--warnSoft:#fff0e6;--bad:#c92a2a;--badSoft:#ffeaea;
+  --purple:#7a4fc9;--shadow:0 1px 2px rgba(0,0,0,.05),0 4px 14px rgba(0,0,0,.05);
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0c130f;--panel:#141d18;--panel2:#1a2620;--ink:#e6efe8;--muted:#93a39a;--line:#26342c;
+  --accent:#51cf66;--accent2:#69db7c;--accentSoft:#173222;--warn:#ff922b;--warnSoft:#33220f;--bad:#ff6b6b;--badSoft:#3a1a1a;--purple:#b197fc;--shadow:none;}}
+:root[data-theme="dark"]{--bg:#0c130f;--panel:#141d18;--panel2:#1a2620;--ink:#e6efe8;--muted:#93a39a;--line:#26342c;
+  --accent:#51cf66;--accent2:#69db7c;--accentSoft:#173222;--warn:#ff922b;--warnSoft:#33220f;--bad:#ff6b6b;--badSoft:#3a1a1a;--purple:#b197fc;--shadow:none;}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:15px;line-height:1.5}
+a{color:var(--accent2)}
+header{position:sticky;top:0;z-index:20;background:var(--panel);border-bottom:1px solid var(--line)}
+.top{display:flex;align-items:center;gap:10px;padding:10px 16px;max-width:1100px;margin:0 auto}
+.brand{font-weight:700;font-size:18px;display:flex;align-items:center;gap:8px}
+.brand{white-space:nowrap}
+@media (max-width:420px){.brand small{display:none}}
+.brand small{font-weight:500;color:var(--muted);font-size:12px}
+.top .sp{flex:1}
+nav{display:flex;gap:4px;overflow-x:auto;padding:0 12px 8px;max-width:1100px;margin:0 auto;scrollbar-width:none}
+nav::-webkit-scrollbar{display:none}
+nav button{flex:none;border:0;background:transparent;color:var(--muted);padding:8px 12px;border-radius:999px;font:inherit;font-weight:600;cursor:pointer;white-space:nowrap}
+nav button.on{background:var(--accentSoft);color:var(--accent2)}
+main{max-width:1100px;margin:0 auto;padding:16px}
+h1{font-size:22px;margin:4px 0 12px}h2{font-size:18px;margin:22px 0 10px}h3{font-size:15px;margin:0 0 6px}
+.muted{color:var(--muted)}.small{font-size:13px}
+.grid{display:grid;gap:12px}
+.g2{grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+.g3{grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;box-shadow:var(--shadow)}
+.card.soft{background:var(--panel2)}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.between{justify-content:space-between}
+.pill{display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600;background:var(--panel2);color:var(--muted)}
+.pill.g{background:var(--accentSoft);color:var(--accent2)}.pill.w{background:var(--warnSoft);color:var(--warn)}.pill.b{background:var(--badSoft);color:var(--bad)}.pill.p{background:color-mix(in srgb,var(--purple) 15%,transparent);color:var(--purple)}
+button.btn,.btn{border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:8px 13px;border-radius:10px;font:inherit;font-weight:600;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.sm{padding:5px 10px;font-size:13px}
+.btn.ghost{border-color:transparent;background:transparent}
+.btn.danger{color:var(--bad)}
+input,select,textarea{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:8px 10px;width:100%}
+textarea{min-height:60px}
+label{display:block;font-size:13px;font-weight:600;color:var(--muted);margin:8px 0 4px}
+.form2{display:grid;grid-template-columns:1fr 1fr;gap:0 10px}
+@media (max-width:520px){.form2{grid-template-columns:1fr}}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:12px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted)}
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+tr.cur td{background:var(--accentSoft)}
+.stat{font-size:26px;font-weight:700;line-height:1.1}
+.statlbl{font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.03em}
+.progress{height:8px;background:var(--panel2);border-radius:99px;overflow:hidden}
+.progress>div{height:100%;background:var(--accent);border-radius:99px}
+.task{display:flex;gap:10px;padding:9px 0;border-bottom:1px dashed var(--line)}
+.task:last-child{border-bottom:0}
+.dot{width:10px;height:10px;border-radius:50%;margin-top:6px;flex:none;background:var(--accent)}
+.dot.w{background:var(--warn)}.dot.b{background:var(--bad)}.dot.m{background:var(--muted)}
+.mix{display:flex;flex-direction:column;gap:6px}
+.mixrow{display:flex;align-items:center;gap:8px}
+.swatch{width:10px;height:28px;border-radius:4px;flex:none}
+.mixrow .amt{margin-left:auto;font-weight:700;white-space:nowrap}
+.photo{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:10px;background:var(--panel2);display:block}
+.credit{font-size:11px;color:var(--muted)}
+.leafsvg{width:100%;aspect-ratio:4/3;border-radius:10px;background:var(--panel2);display:block}
+/* calendar */
+.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.cal .dow{font-size:11px;font-weight:700;color:var(--muted);text-align:center;padding:4px 0}
+.cal .day{min-height:78px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:4px;font-size:11px;overflow:hidden}
+.cal .day.out{opacity:.4}
+.cal .day.today{outline:2px solid var(--accent)}
+.cal .num{font-weight:700;font-size:12px}
+.ev{display:block;border-radius:5px;padding:1px 4px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:var(--accentSoft);color:var(--accent2);font-weight:600}
+.ev.proj{background:transparent;border:1px dashed var(--muted);color:var(--muted)}
+.ev.feed{background:color-mix(in srgb,var(--purple) 15%,transparent);color:var(--purple)}
+@media (max-width:600px){.cal .day{min-height:56px}.ev{font-size:9px}}
+dialog{border:1px solid var(--line);border-radius:16px;background:var(--panel);color:var(--ink);padding:18px;max-width:520px;width:calc(100% - 32px)}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+.empty{text-align:center;padding:40px 16px}
+.timeline{position:relative;margin-left:8px;border-left:2px solid var(--line);padding-left:16px}
+.tl{position:relative;padding:6px 0}
+.tl:before{content:"";position:absolute;left:-23px;top:12px;width:12px;height:12px;border-radius:50%;background:var(--accent);border:2px solid var(--panel)}
+.tl.proj:before{background:var(--panel);border:2px dashed var(--muted)}
+.stagebar{display:flex;gap:3px;margin:8px 0}
+.stagebar span{flex:1;height:6px;border-radius:4px;background:var(--panel2)}
+.stagebar span.on{background:var(--accent)}
+.stagebar span.now{background:var(--warn)}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-weight:600;z-index:99;opacity:0;transition:.25s;pointer-events:none}
+.toast.on{opacity:1}
+footer{max-width:1100px;margin:30px auto;padding:0 16px 30px;color:var(--muted);font-size:12px}
+.hide{display:none!important}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chips button{border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:999px;padding:5px 11px;font:inherit;font-size:13px;cursor:pointer}
+.chips button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px}
+.thumbs img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px}
+</style>
+</head>
+<body>
+<header>
+  <div class="top">
+    <div class="brand">🌱 GrowLog <small id="verTag"></small></div>
+    <div class="sp"></div>
+    <select id="plantPick" style="width:auto;max-width:180px"></select>
+    <button class="btn sm pri" id="addPlantBtn">+ Plant</button>
+  </div>
+  <nav id="nav"></nav>
+</header>
+<main id="view"></main>
+<footer>
+  GrowLog keeps your data on this device (browser storage). Use Settings → Export to back it up.<br>
+  Feeding amounts come from FoxFarm's soil chart, which FoxFarm calls "recommendations only." Watch your plants and adjust. Photos are from Wikimedia Commons under their own licenses (credited on each photo).<br>
+  Grow laws vary by state. Know the rules where you live.
+</footer>
+
+<dialog id="dlg"><form method="dialog" id="dlgForm"></form></dialog>
+<div class="toast" id="toast"></div>
+
+<script src="content.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
