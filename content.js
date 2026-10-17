@@ -4,7 +4,7 @@
 // without touching the app logic. Bump CONTENT.version when editing.
 // =====================================================================
 const CONTENT = {
-  version: "1.1.0",
+  version: "1.2.0",
   lastReviewed: "2026-10-16",
 
   // ---------------------------------------------------------------
@@ -74,6 +74,31 @@ const CONTENT = {
     "Passive intake: open the bottom vents opposite the fan and keep the tent walls slightly sucked in. That slight negative pressure keeps smell inside.",
     "Lights off in flower means TOTAL dark. Check for light leaks at the zippers and ports with the tent lights off and the room lights on."
   ],
+  // Gear presets (AC Infinity). Lights: listed wattage = actual draw.
+  gear: {
+    tents: [
+      { model: "CLOUDLAB 422", w: 2, d: 2, h: 4 },
+      { model: "CLOUDLAB 722", w: 2, d: 2, h: 6 },
+      { model: "CLOUDLAB 632", w: 3, d: 2, h: 6 },
+      { model: "CLOUDLAB 632D (dual chamber)", w: 3, d: 2, h: 6 },
+      { model: "CLOUDLAB 642", w: 4, d: 2, h: 6 },
+      { model: "CLOUDLAB 733", w: 3, d: 3, h: 6 },
+      { model: "CLOUDLAB 743D (dual chamber)", w: 4, d: 3, h: 6 },
+      { model: "CLOUDLAB 844", w: 4, d: 4, h: 6.8 },
+      { model: "CLOUDLAB 864D (dual chamber)", w: 5, d: 4, h: 6.8 },
+      { model: "CLOUDLAB 866", w: 5, d: 5, h: 6.8 },
+      { model: "CLOUDLAB 894", w: 8, d: 4, h: 6.8 },
+      { model: "CLOUDLAB 899", w: 8, d: 8, h: 6.8 },
+      { model: "CLOUDLAB 816", w: 10, d: 5, h: 6.8 },
+      { model: "CLOUDLAB 811", w: 10, d: 10, h: 6.8 }
+    ],
+    lights: [
+      { model: "AC Infinity IONFRAME EVO3", watts: 280, note: "Samsung LM301H EVO" },
+      { model: "AC Infinity IONFRAME EVO4", watts: 300, note: "Coverage: veg 4×4, flower ~3×3" },
+      { model: "AC Infinity IONFRAME EVO8", watts: 730, note: "Samsung LM301H EVO" },
+      { model: "AC Infinity IONFRAME EVO10", watts: 1000, note: "Samsung LM301H EVO" }
+    ]
+  },
   tentSizes: {
     "2x2": { sqft: 4,  plants: "1",   watts: "100–150" },
     "2x4": { sqft: 8,  plants: "1–2", watts: "200–300" },

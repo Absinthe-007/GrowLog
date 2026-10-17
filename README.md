@@ -8,7 +8,7 @@ A phone-friendly web app for tracking an indoor soil grow in an AC Infinity tent
 - **Grow calendar**: logged milestones (germination started, seed popped, planted, sprouted, topped, LST, flip, pistils, harvest, dry, jar, cure), waterings, and projected future dates
 - **FoxFarm soil schedule**: Big Bloom, Grow Big, Tiger Bloom, Open Sesame, Beastie Bloomz, Cha Ching, Sledgehammer, with a strength slider and batch-size calculator. Handles Ocean Forest / Happy Frog "hot soil" weeks and squeezes the chart into an autoflower timeline
 - **Training playbooks** for photoperiods and autoflowers (LST, topping, defoliation timing)
-- **Tent tab**: temperature, humidity, VPD and PPFD targets per stage, a VPD calculator, and AC Infinity controller setup tips
+- **Tents & lights**: save multiple tents (AC Infinity CLOUDLAB presets or custom sizes) and lights (IONFRAME EVO presets or any light by wattage), switch lights per tent, assign plants to tents. Includes watts/sq ft checks, temperature, humidity, VPD and PPFD targets per stage, a VPD calculator, and AC Infinity controller tips
 - **Healthy vs problems** photo guide, with leaf-pattern drawings for deficiencies, burn, pH lockout, pests, mold and herms
 - **Testing reminders** for input pH, weekly runoff pH/PPM, and automatic warnings when readings are out of range
 - **Yield tracker**: wet/dry weight, g/watt, g/sq ft, and estimates before harvest

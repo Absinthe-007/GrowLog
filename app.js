@@ -23,6 +23,24 @@ let S;
 try { S = Object.assign(defaults(), JSON.parse(localStorage.getItem(KEY) || "{}")); } catch (e) { S = defaults(); }
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast("Couldn't save – storage full or blocked"); } };
 const plant = () => S.plants.find(p => p.id === S.current) || S.plants[0] || null;
+/* ---------------- gear: tents & lights ---------------- */
+function gear() {
+  if (!S.gear) {
+    const old = S.settings || {}; const sz = (old.tent || "4x4").split("x").map(Number);
+    const L = { id: "l_" + Math.random().toString(36).slice(2, 8), name: "My light", model: "Custom", watts: Number(old.watts) || 480, note: "" };
+    const model = (CONTENT.gear.tents.find(t => (t.w === sz[0] && t.d === sz[1]) || (t.w === sz[1] && t.d === sz[0])) || {}).model || "Custom";
+    S.gear = { tents: [{ id: "t_" + Math.random().toString(36).slice(2, 8), name: "Main tent", model, w: sz[0] || 4, d: sz[1] || 4, h: 6.8, lightId: L.id }], lights: [L] };
+    S.activeTent = S.gear.tents[0].id;
+  }
+  return S.gear;
+}
+const tentById = id => gear().tents.find(t => t.id === id);
+const lightById = id => gear().lights.find(l => l.id === id);
+function tentOf(p) { return (p && tentById(p.tentId)) || gear().tents[0] || null; }
+function activeTent() { return tentById(S.activeTent) || gear().tents[0] || null; }
+function tentStats(t) { if (!t) return { sqft: 0, watts: 0, wpsf: 0, light: null }; const L = lightById(t.lightId); const sqft = (+t.w || 0) * (+t.d || 0); const watts = L ? +L.watts || 0 : 0; return { sqft, watts, wpsf: sqft ? watts / sqft : 0, light: L }; }
+function plantsInTent(t, liveOnly) { return S.plants.filter(p => tentOf(p) === t && (!liveOnly || !evDate(p, "harvest"))); }
+function tentLabel(t) { if (!t) return "—"; const st = tentStats(t); return `${t.name} (${t.w}×${t.d}${st.light ? " · " + st.light.name + " " + st.watts + "W" : " · no light"})`; }
 
 /* ---------------- event types ---------------- */
 const EV = [
@@ -193,7 +211,7 @@ async function photoAll(pid) { try { const d = await db(); return await new Prom
 async function photoDel(id) { const d = await db(); return new Promise(res => { const tx = d.transaction("photos", "readwrite"); tx.objectStore("photos").delete(id); tx.oncomplete = res; }); }
 async function photoAllRaw() { try { const d = await db(); return await new Promise(res => { const r = d.transaction("photos").objectStore("photos").getAll(); r.onsuccess = () => res(r.result); r.onerror = () => res([]); }); } catch (e) { return []; } }
 async function backupToPhone(withPhotos) {
-  const data = { app: "growlog", version: 2, exported: new Date().toISOString(), plants: S.plants, settings: S.settings };
+  const data = { app: "growlog", version: 3, exported: new Date().toISOString(), plants: S.plants, settings: S.settings, gear: S.gear, activeTent: S.activeTent };
   if (withPhotos) data.photos = await photoAllRaw();
   const name = `growlog-backup-${iso(today())}${withPhotos ? "-with-photos" : ""}.json`;
   const file = new File([JSON.stringify(data)], name, { type: "application/json" });
@@ -206,6 +224,7 @@ async function restoreBackup(fileObj) {
   const j = JSON.parse(await fileObj.text()); if (!Array.isArray(j.plants)) throw new Error("bad");
   if (!confirm(`Restore ${j.plants.length} plant(s)${j.photos ? ` and ${j.photos.length} photo(s)` : ""} from ${j.exported ? j.exported.slice(0, 10) : "this backup"}? This replaces what's on this device now.`)) return;
   S.plants = j.plants; S.settings = Object.assign(S.settings, j.settings || {}); S.current = null;
+  if (j.gear) { S.gear = j.gear; S.activeTent = j.activeTent; } else { S.gear = null; }
   if (Array.isArray(j.photos)) for (const ph of j.photos) await photoPut(ph);
   save(); render(); toast("Backup restored");
 }
@@ -252,7 +271,7 @@ function photoBlock(key) { const ph = C.photos[key]; if (!ph) return ""; return 
 
 /* ---------------- UI helpers ---------------- */
 function toast(m) { const t = $("#toast"); t.textContent = m; t.classList.add("on"); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove("on"), 1800); }
-const TABS = [["today", "Today"], ["plants", "My plants"], ["weeks", "Week by week"], ["calendar", "Calendar"], ["feed", "Feeding"], ["train", "Training"], ["tent", "Tent"], ["look", "Healthy vs Problems"], ["yield", "Yield"], ["plant", "Plant log"], ["report", "Print / Export"], ["settings", "Settings"]];
+const TABS = [["today", "Today"], ["plants", "My plants"], ["weeks", "Week by week"], ["calendar", "Calendar"], ["feed", "Feeding"], ["train", "Training"], ["tent", "Tents & lights"], ["look", "Healthy vs Problems"], ["yield", "Yield"], ["plant", "Plant log"], ["report", "Print / Export"], ["settings", "Settings"]];
 function renderNav() { $("#nav").innerHTML = TABS.map(([k, l]) => `<button data-tab="${k}" class="${S.tab === k ? "on" : ""}">${l}</button>`).join(""); }
 function renderPick() {
   const sel = $("#plantPick");
@@ -515,14 +534,26 @@ function vpd(tF, rh, leafOffsetF = 2) {
   return svp(lc) - svp(tc) * rh / 100;
 }
 V.tent = () => {
-  const ts = C.tentSizes[S.settings.tent] || C.tentSizes["4x4"];
-  return `<h1>AC Infinity tent</h1>
-  <div class="grid g3">
-    <div class="card"><div class="statlbl">Tent</div><div class="stat">${esc(S.settings.tent)}</div><div class="small muted">${ts.sqft} sq ft · good for ${ts.plants} plants</div></div>
-    <div class="card"><div class="statlbl">Your light</div><div class="stat">${S.settings.watts || "?"} W</div><div class="small muted">Typical for this size: ${ts.watts} W LED (actual draw)</div></div>
-    <div class="card"><div class="statlbl">Watts / sq ft</div><div class="stat">${S.settings.watts ? (S.settings.watts / ts.sqft).toFixed(0) : "?"}</div><div class="small muted">30–40 W/sq ft of good LED is ideal for flower</div></div>
-  </div>
-  <p class="small muted">Change tent size and light wattage in Settings.</p>
+  const G = gear(), t = activeTent(), st = tentStats(t);
+  const recLo = Math.max(1, Math.round(st.sqft / 6)), recHi = Math.max(recLo, Math.round(st.sqft / 4));
+  const tw = [Math.round(st.sqft * 25), Math.round(st.sqft * 40)];
+  return `<div class="row between"><h1>Tents & lights</h1><div class="row"><button class="btn sm pri" data-act="addTent">+ Tent</button><button class="btn sm" data-act="addLight">+ Light</button></div></div>
+  <div class="chips" style="margin-bottom:10px">${G.tents.map(x => `<button data-act="pickTent" data-t="${x.id}" class="${t && x.id === t.id ? "on" : ""}">⛺ ${esc(x.name)}</button>`).join("")}</div>
+  ${t ? `<div class="card">
+    <div class="row between"><div><h3 style="margin:0">${esc(t.name)}</h3><div class="small muted">${esc(t.model || "Custom")} · ${t.w}′ × ${t.d}′ × ${t.h || "?"}′</div></div><button class="btn sm" data-act="editTent" data-t="${t.id}">✏️ Edit tent</button></div>
+    <div class="form2" style="margin-top:8px">
+      <div><label>Light in this tent</label><select id="tentLight">${G.lights.map(l => `<option value="${l.id}" ${l.id === t.lightId ? "selected" : ""}>${esc(l.name)} · ${l.watts} W</option>`).join("")}<option value="" ${!t.lightId ? "selected" : ""}>No light</option></select></div>
+      <div><label>Plants in this tent</label><div style="padding:8px 0">${plantsInTent(t).map(p => `<span class="pill g" style="margin:0 4px 4px 0">${esc(p.name)}</span>`).join("") || `<span class="muted small">None yet. Assign plants in their Edit screen.</span>`}</div></div>
+    </div></div>
+  <div class="grid g3" style="margin-top:12px">
+    <div class="card"><div class="statlbl">Footprint</div><div class="stat">${st.sqft} sq ft</div><div class="small muted">Good for about ${recLo === recHi ? recLo : recLo + "–" + recHi} plant${recHi > 1 ? "s" : ""}</div></div>
+    <div class="card"><div class="statlbl">Light</div><div class="stat">${st.watts || "–"} W</div><div class="small muted">${st.light ? esc(st.light.name) : "No light selected"} · ideal for this tent: ${tw[0]}–${tw[1]} W</div></div>
+    <div class="card"><div class="statlbl">Watts / sq ft</div><div class="stat">${st.wpsf ? st.wpsf.toFixed(0) : "–"}</div><div class="small muted">${!st.wpsf ? "" : st.wpsf < 20 ? "⚠️ Under-lit for flower, so expect smaller yields" : st.wpsf < 30 ? "OK for veg, a bit light for flower" : st.wpsf <= 45 ? "✅ Right in the flower sweet spot" : "Strong. Raise or dim the light to avoid bleaching"}</div></div>
+  </div>` : `<div class="card empty"><p>No tents yet.</p><button class="btn pri" data-act="addTent">+ Add a tent</button></div>`}
+  <h2>Your lights</h2>
+  <div class="grid g3">${G.lights.map(l => { const used = G.tents.filter(x => x.lightId === l.id); return `<div class="card"><div class="row between"><b>💡 ${esc(l.name)}</b><span class="pill">${l.watts} W</span></div><div class="small muted">${esc(l.model && l.model !== "Custom" ? l.model : "Custom light")}${l.note ? " · " + esc(l.note) : ""}</div><div class="small" style="margin-top:4px">${used.length ? "In: " + used.map(x => esc(x.name)).join(", ") : "Not in a tent"}</div><div class="row" style="margin-top:8px"><button class="btn sm" data-act="editLight" data-l="${l.id}">Edit</button><button class="btn sm ghost danger" data-act="delLight" data-l="${l.id}">Delete</button></div></div>`; }).join("")}</div>
+  <h2>Your tents</h2>
+  <div class="grid g3">${G.tents.map(x => { const s2 = tentStats(x); return `<div class="card"><div class="row between"><b>⛺ ${esc(x.name)}</b><span class="pill">${x.w}×${x.d}</span></div><div class="small muted">${esc(x.model || "Custom")} · ${s2.light ? esc(s2.light.name) + " " + s2.watts + " W" : "no light"} · ${plantsInTent(x).length} plant(s)</div><div class="row" style="margin-top:8px"><button class="btn sm" data-act="pickTent" data-t="${x.id}">View</button><button class="btn sm" data-act="editTent" data-t="${x.id}">Edit</button>${G.tents.length > 1 ? `<button class="btn sm ghost danger" data-act="delTent" data-t="${x.id}">Delete</button>` : ""}</div></div>`; }).join("")}</div>
   <h2>Targets by stage</h2>
   <div class="tablewrap"><table><thead><tr><th>Stage</th><th>Day °F</th><th>Night °F</th><th>RH</th><th>VPD kPa</th><th>Light</th><th>Sweet spot</th></tr></thead>
   <tbody>${C.environment.map(e => `<tr><td><b>${e.stage}</b></td><td>${e.dayF}</td><td>${e.nightF}</td><td>${e.rh}</td><td>${e.vpd}</td><td class="small">${e.light}</td><td class="small">${e.sweet}</td></tr>`).join("")}</tbody></table></div>
@@ -533,7 +564,7 @@ V.tent = () => {
     <div><label>Leaf is cooler by (°F) – LED ~2</label><input type="number" id="vL" value="2"></div>
     <div><label>Result</label><div class="stat" id="vOut">–</div><div class="small muted" id="vMsg"></div></div>
   </div></div>
-  <h2>Controller & tent setup</h2>
+  <h2>AC Infinity controller & tent setup</h2>
   <div class="card"><ul>${C.acInfinity.map(t => `<li style="margin-bottom:6px">${esc(t)}</li>`).join("")}</ul></div>`;
 };
 function vpdUpdate() {
@@ -564,26 +595,25 @@ V.look = () => {
 
 V.yield = () => {
   if (!S.plants.length) return noPlants();
-  const ts = C.tentSizes[S.settings.tent] || C.tentSizes["4x4"], W = Number(S.settings.watts) || 0;
-  const active = S.plants.filter(p => !has(p, "harvest") || stage(p) !== "done");
+  const harvested = S.plants.filter(p => (p.harvest || {}).dry);
+  const usedTents = [...new Set(harvested.map(tentOf))].filter(Boolean);
+  const W = usedTents.reduce((a, t) => a + tentStats(t).watts, 0), SQ = usedTents.reduce((a, t) => a + tentStats(t).sqft, 0);
   const rows = S.plants.map(p => {
     const h = p.harvest || {}; const wet = +h.wet || 0, dry = +h.dry || 0;
     return { p, wet, dry, ratio: wet && dry ? dry / wet : null };
   });
   const totDry = rows.reduce((s, r) => s + r.dry, 0), totWet = rows.reduce((s, r) => s + r.wet, 0);
   // rough projection for unharvested plants sharing the tent
-  const live = S.plants.filter(p => !has(p, "harvest"));
-  const share = live.length ? 1 / Math.max(live.length, 1) : 0;
-  const est = p => { const trained = has(p, "lst_start") || has(p, "topped"); const f = (p.type === "auto" ? 0.65 : 1) * (trained ? 1.15 : 1); const lo = W * 0.4 * f * share, hi = W * 0.9 * f * share; return [lo, hi]; };
+  const est = p => { const t = tentOf(p), tw = tentStats(t).watts, n = Math.max(1, plantsInTent(t, true).length); const trained = has(p, "lst_start") || has(p, "topped"); const f = (p.type === "auto" ? 0.65 : 1) * (trained ? 1.15 : 1); return [tw * 0.4 * f / n, tw * 0.9 * f / n, tw]; };
   return `<h1>Yield</h1>
   <div class="grid g3">
     <div class="card"><div class="statlbl">Total dry</div><div class="stat">${totDry.toFixed(0)} g</div><div class="small muted">${(totDry / 28.35).toFixed(2)} oz</div></div>
     <div class="card"><div class="statlbl">Grams per watt</div><div class="stat">${W && totDry ? (totDry / W).toFixed(2) : "–"}</div><div class="small muted">0.5 = solid · 1.0+ = excellent</div></div>
-    <div class="card"><div class="statlbl">Grams per sq ft</div><div class="stat">${totDry ? (totDry / ts.sqft).toFixed(1) : "–"}</div><div class="small muted">${esc(S.settings.tent)} tent</div></div>
+    <div class="card"><div class="statlbl">Grams per sq ft</div><div class="stat">${totDry && SQ ? (totDry / SQ).toFixed(1) : "–"}</div><div class="small muted">${usedTents.map(t => esc(t.name)).join(", ") || "harvested tents"}</div></div>
   </div>
   <h2>Per plant</h2>
-  <div class="tablewrap"><table><thead><tr><th>Plant</th><th>Stage</th><th>Wet (g)</th><th>Dry (g)</th><th>Dry/wet</th><th>Days seed→chop</th><th></th></tr></thead><tbody>
-  ${rows.map(r => { const b = baseDate(r.p), hv = evDate(r.p, "harvest"); const e = est(r.p); return `<tr><td><b>${esc(r.p.name)}</b><div class="small muted">${esc(r.p.strain || "")}</div></td><td>${stagePill(r.p)}</td><td>${r.wet || "–"}</td><td>${r.dry || (!hv && W ? `<span class="small muted">est. ${e[0].toFixed(0)}–${e[1].toFixed(0)}</span>` : "–")}</td><td>${r.ratio ? (r.ratio * 100).toFixed(0) + "%" : "–"}</td><td>${b && hv ? diff(hv, b) + 1 : "–"}</td><td><button class="btn sm" data-act="harvestForm" data-id="${r.p.id}">Enter weights</button></td></tr>`; }).join("")}
+  <div class="tablewrap"><table><thead><tr><th>Plant</th><th>Tent / light</th><th>Stage</th><th>Wet (g)</th><th>Dry (g)</th><th>Dry/wet</th><th>Days seed→chop</th><th></th></tr></thead><tbody>
+  ${rows.map(r => { const b = baseDate(r.p), hv = evDate(r.p, "harvest"); const e = est(r.p); return `<tr><td><b>${esc(r.p.name)}</b><div class="small muted">${esc(r.p.strain || "")}</div></td><td class="small">${esc(tentLabel(tentOf(r.p)))}</td><td>${stagePill(r.p)}</td><td>${r.wet || "–"}</td><td>${r.dry || (!hv && e[2] ? `<span class="small muted">est. ${e[0].toFixed(0)}–${e[1].toFixed(0)}</span>` : "–")}</td><td>${r.ratio ? (r.ratio * 100).toFixed(0) + "%" : "–"}</td><td>${b && hv ? diff(hv, b) + 1 : "–"}</td><td><button class="btn sm" data-act="harvestForm" data-id="${r.p.id}">Enter weights</button></td></tr>`; }).join("")}
   </tbody></table></div>
   <p class="small muted">Estimates are a rough guide based on your light (≈0.4–0.9 g per watt split across plants in the tent). Autos and untrained plants run lower, and LST/topping gives a bump. Dry weight usually comes out to 20–25% of wet.</p>
   ${totWet ? "" : `<div class="card soft"><b>How to log yield:</b> weigh the whole plant (or the branches) right after the chop for <b>wet</b>, then again after trimming and drying for <b>dry</b>.</div>`}`;
@@ -615,6 +645,7 @@ V.plants = () => {
       ${stageBar(p)}
       <table class="small" style="margin-top:4px"><tbody>
         <tr><td class="muted">From</td><td>${esc(p.sourceType || "—")}${p.source ? " · " + esc(p.source) : ""}</td></tr>
+        <tr><td class="muted">Tent</td><td>${esc(tentLabel(tentOf(p)))}</td></tr>
         <tr><td class="muted">Planted</td><td>${pl ? fmtLong(pl) : "—"}</td></tr>
         <tr><td class="muted">${hv ? "Grow length" : "Today"}</td><td><b>${dw ? (hv ? `${tot} days (${Math.ceil(tot / 7)} weeks)` : `Day ${dw.day} · Week ${dw.week}`) : "Not planted yet"}</b></td></tr>
         <tr><td class="muted">Flowered</td><td>${fl ? fmtLong(fl) + (hv ? ` · ${diff(hv, fl)} days in flower` : ` · flower day ${fdw.day} (week ${fdw.week})`) : "—"}</td></tr>
@@ -649,6 +680,7 @@ function reportPlant(p) {
         ${row(hv ? "Total days planted → harvest" : "Days since planted", tot ? `${tot} days (week ${Math.ceil(tot / 7)})` : "—")}
         ${row("Days in veg", veg != null ? `${veg} days (${(veg / 7).toFixed(1)} wks)` : "—")}
         ${row("Days in flower", flw != null ? `${flw} days (${(flw / 7).toFixed(1)} wks)` : "—")}
+        ${row("Tent / light", esc(tentLabel(tentOf(p))))}
         ${row("Soil / pot", `${({ oceanforest: "FoxFarm Ocean Forest", happyfrog: "FoxFarm Happy Frog", other: "Other" })[p.soil] || "—"} · ${p.pot || "?"} gal`)}
         ${row("Wet weight", h.wet ? `${h.wet} g (${(h.wet / 28.35).toFixed(2)} oz)` : "—")}
         ${row("Dry weight", h.dry ? `${h.dry} g (${(h.dry / 28.35).toFixed(2)} oz)` : "—")}
@@ -703,8 +735,7 @@ function csvLogs() {
 
 V.settings = () => `<h1>Settings</h1>
   <div class="card"><div class="form2">
-    <div><label>AC Infinity tent size</label><select id="setTent">${Object.keys(C.tentSizes).map(k => `<option ${S.settings.tent === k ? "selected" : ""}>${k}</option>`).join("")}</select></div>
-    <div><label>Light wattage (actual draw)</label><input type="number" id="setWatts" value="${S.settings.watts || ""}"></div>
+    <div><label>Tents & lights</label><button class="btn" data-tab="tent">⛺ Manage tents & lights</button></div>
     <div><label>Theme</label><select id="setTheme">${["auto", "light", "dark"].map(k => `<option ${S.settings.theme === k ? "selected" : ""}>${k}</option>`).join("")}</select></div>
   </div></div>
   <h2>Back up to this phone</h2>
@@ -741,6 +772,7 @@ function plantForm(p = {}) {
       <div><label>FoxFarm soil</label><select name="soil">${[["oceanforest", "Ocean Forest"], ["happyfrog", "Happy Frog"], ["other", "Other / mix"]].map(([k, l]) => `<option value="${k}" ${p.soil === k ? "selected" : ""}>${l}</option>`).join("")}</select></div>
       <div><label>Final pot (gal)</label><input name="pot" type="number" step="0.5" value="${p.pot || 5}"></div>
       <div><label>Feeding strength %</label><input name="strength" type="number" min="25" max="100" step="5" value="${Math.round((p.strength || 0.5) * 100)}"></div>
+      <div style="grid-column:1/-1"><label>Tent</label><select name="tentId">${gear().tents.map(t => `<option value="${t.id}" ${(tentOf(p) || {}).id === t.id ? "selected" : ""}>${esc(tentLabel(t))}</option>`).join("")}</select></div>
       <div><label>Planned veg weeks (photo)</label><input name="vegWeeks" type="number" min="2" max="16" value="${p.vegWeeks || 5}"></div>
       <div><label>Flower weeks (photo, from breeder)</label><input name="flowerWeeks" type="number" min="6" max="16" value="${p.flowerWeeks || 9}"></div>
       <div style="grid-column:1/-1"><label>Notes (prints on the report)</label><textarea name="notes">${esc(p.notes || "")}</textarea></div>
@@ -748,11 +780,41 @@ function plantForm(p = {}) {
       ${isNew ? `<div><label>Germination started on</label><input name="germ" type="date" value=""></div><div><label>Planted in soil on</label><input name="planted" type="date" value=""></div>` : ""}
     </div>`, fd => {
     const o = isNew ? { id: uid(), events: [], logs: [], created: iso(today()) } : p;
+    if (!isNew && fd.tentId && fd.tentId !== (tentOf(p) || {}).id) o.events.push({ id: uid(), type: "note", date: iso(today()), note: "Moved to tent: " + tentLabel(tentById(fd.tentId)) });
+    o.tentId = fd.tentId || (gear().tents[0] || {}).id;
     Object.assign(o, { name: fd.name.trim() || "Plant", strain: fd.strain.trim(), sourceType: fd.sourceType, source: fd.source.trim(), notes: (fd.notes || "").trim(), type: fd.type, soil: fd.soil, pot: +fd.pot, strength: Math.min(1, Math.max(.25, (+fd.strength || 50) / 100)), vegWeeks: +fd.vegWeeks, flowerWeeks: +fd.flowerWeeks, autoDays: +fd.autoDays });
     if (isNew) { if (fd.germ) o.events.push({ id: uid(), type: "germ_start", date: fd.germ, note: "" }); if (fd.planted) o.events.push({ id: uid(), type: "planted", date: fd.planted, note: "" }); S.plants.push(o); S.current = o.id; }
     save(); render(); toast(isNew ? "Plant added" : "Saved");
   });
 }
+function tentForm(t) {
+  const isNew = !t; t = t || { name: "Tent " + (gear().tents.length + 1), model: "CLOUDLAB 844", w: 4, d: 4, h: 6.8, lightId: (gear().lights[0] || {}).id };
+  openDlg(`<h2 style="margin-top:0">${isNew ? "Add a tent" : "Edit tent"}</h2>
+    <label>Name</label><input name="name" required value="${esc(t.name)}">
+    <label>AC Infinity model</label><select name="model" id="tentModel">${C.gear.tents.map(m => `<option ${t.model === m.model ? "selected" : ""} data-w="${m.w}" data-d="${m.d}" data-h="${m.h}">${m.model}</option>`).join("")}<option ${!C.gear.tents.some(m => m.model === t.model) ? "selected" : ""}>Custom</option></select>
+    <div class="form2"><div><label>Width (ft)</label><input name="w" id="tW" type="number" step="0.1" value="${t.w}"></div><div><label>Depth (ft)</label><input name="d" id="tD" type="number" step="0.1" value="${t.d}"></div><div><label>Height (ft)</label><input name="h" id="tH" type="number" step="0.1" value="${t.h || ""}"></div>
+    <div><label>Light</label><select name="lightId">${gear().lights.map(l => `<option value="${l.id}" ${l.id === t.lightId ? "selected" : ""}>${esc(l.name)} · ${l.watts} W</option>`).join("")}<option value="" ${!t.lightId ? "selected" : ""}>No light</option></select></div></div>`, fd => {
+    const o = isNew ? { id: "t_" + uid() } : t;
+    const prevLight = o.lightId;
+    Object.assign(o, { name: fd.name.trim() || "Tent", model: fd.model, w: +fd.w || 1, d: +fd.d || 1, h: +fd.h || null, lightId: fd.lightId || null });
+    if (isNew) { gear().tents.push(o); S.activeTent = o.id; } else if (prevLight !== o.lightId) logLightChange(o);
+    save(); render(); toast(isNew ? "Tent added" : "Tent saved");
+  });
+}
+function lightForm(l) {
+  const isNew = !l; l = l || { name: "", model: "Custom", watts: "", note: "" };
+  openDlg(`<h2 style="margin-top:0">${isNew ? "Add a light" : "Edit light"}</h2>
+    <label>Preset</label><select name="model" id="lightModel">${C.gear.lights.map(m => `<option ${l.model === m.model ? "selected" : ""} data-watts="${m.watts}" data-note="${esc(m.note)}">${m.model}</option>`).join("")}<option ${!C.gear.lights.some(m => m.model === l.model) ? "selected" : ""}>Custom</option></select>
+    <label>Name (what you call it)</label><input name="name" id="lName" required value="${esc(l.name)}" placeholder="e.g. Veg light, Spider Farmer SE5000">
+    <div class="form2"><div><label>Actual watts (draw at the wall)</label><input name="watts" id="lWatts" type="number" min="1" required value="${l.watts}"></div><div><label>Notes</label><input name="note" id="lNote" value="${esc(l.note || "")}" placeholder="coverage, diodes…"></div></div>
+    <p class="small muted">Use the real power draw, not the "equivalent" watts printed on the box.</p>`, fd => {
+    const o = isNew ? { id: "l_" + uid() } : l;
+    Object.assign(o, { name: fd.name.trim() || fd.model, model: fd.model, watts: +fd.watts || 0, note: fd.note.trim() });
+    if (isNew) gear().lights.push(o); else gear().tents.filter(t => t.lightId === o.id).forEach(logLightChange);
+    save(); render(); toast(isNew ? "Light added" : "Light saved");
+  });
+}
+function logLightChange(t) { const L = lightById(t.lightId); plantsInTent(t, true).forEach(p => p.events.push({ id: uid(), type: "note", date: iso(today()), note: `Light in ${t.name}: ${L ? L.name + " (" + L.watts + " W)" : "none"}` })); }
 function eventForm(p) {
   const done = new Set((p.events || []).map(e => e.type));
   const next = EV.find(([k]) => !done.has(k) && k !== "note" && !(p.type === "auto" && k === "flip"));
@@ -811,6 +873,7 @@ function harvestForm(p) {
 function render() {
   if (S.current && !S.plants.find(p => p.id === S.current)) S.current = S.plants[0]?.id || null;
   if (!S.current && S.plants[0]) S.current = S.plants[0].id;
+  gear(); S.plants.forEach(p => { if (!tentById(p.tentId)) p.tentId = gear().tents[0].id; });
   renderNav(); renderPick(); applyTheme();
   $("#verTag").textContent = "v" + C.version;
   $("#view").innerHTML = (V[S.tab] || V.today)();
@@ -830,6 +893,13 @@ document.addEventListener("click", async e => {
   if (a === "repToggle") { let sel = S.reportSel && S.reportSel.length ? S.reportSel.slice() : S.plants.map(x => x.id); sel = sel.includes(p.id) ? sel.filter(x => x !== p.id) : [...sel, p.id]; S.reportSel = sel.length ? sel : [p.id]; save(); render(); }
   if (a === "print") window.print();
   if (a === "backupPhone") backupToPhone(false);
+  if (a === "addTent") tentForm();
+  if (a === "editTent") tentForm(tentById(t.dataset.t));
+  if (a === "pickTent") { S.activeTent = t.dataset.t; S.tab = "tent"; save(); render(); }
+  if (a === "delTent") { const x = tentById(t.dataset.t); if (confirm(`Delete tent "${x.name}"? Its plants move to another tent.`)) { gear().tents = gear().tents.filter(y => y !== x); S.plants.forEach(p => { if (p.tentId === x.id) p.tentId = gear().tents[0].id; }); save(); render(); } }
+  if (a === "addLight") lightForm();
+  if (a === "editLight") lightForm(lightById(t.dataset.l));
+  if (a === "delLight") { const x = lightById(t.dataset.l); if (confirm(`Delete light "${x.name}"?`)) { gear().lights = gear().lights.filter(y => y !== x); gear().tents.forEach(y => { if (y.lightId === x.id) y.lightId = null; }); save(); render(); } }
   if (a === "backupPhotos") backupToPhone(true);
   if (a === "csvSummary") csvSummary();
   if (a === "csvLogs") csvLogs();
@@ -852,8 +922,9 @@ $("#plantPick").addEventListener("change", e => { S.current = e.target.value; sa
 document.addEventListener("change", async e => {
   const id = e.target.id, p = plant();
   if (id === "strength" || id === "mixGal") { if (id === "strength") p.strength = +e.target.value / 100; else p.mixGal = Math.max(.25, +e.target.value || 1); save(); render(); }
-  if (id === "setTent") { S.settings.tent = e.target.value; save(); render(); }
-  if (id === "setWatts") { S.settings.watts = +e.target.value || 0; save(); render(); }
+  if (id === "tentLight") { const t = activeTent(); if (t) { t.lightId = e.target.value || null; logLightChange(t); save(); render(); toast("Light switched"); } }
+  if (id === "tentModel") { const o = e.target.selectedOptions[0]; if (o && o.dataset.w) { $("#tW").value = o.dataset.w; $("#tD").value = o.dataset.d; $("#tH").value = o.dataset.h; } }
+  if (id === "lightModel") { const o = e.target.selectedOptions[0]; if (o && o.dataset.watts) { $("#lWatts").value = o.dataset.watts; if (!$("#lName").value) $("#lName").value = o.value.replace("AC Infinity ", ""); if (!$("#lNote").value) $("#lNote").value = o.dataset.note; } }
   if (id === "setTheme") { S.settings.theme = e.target.value; save(); render(); }
   if (id === "calPlant") { S.calPlant = e.target.value; save(); render(); }
   if (id === "photoIn" && e.target.files[0]) { try { const data = await compress(e.target.files[0]); await photoPut({ id: uid(), plantId: p.id, date: iso(today()), data }); toast("Photo saved"); render(); } catch (err) { toast("Couldn't save photo"); } }
